@@ -1,0 +1,11 @@
+# Personal health data / regenerable outputs (contain therapy data + device serial)
+dump.txt
+events.csv
+sessions.csv
+*.dump
+sleephq/out/
+
+# Python
+__pycache__/
+*.pyc
+venv/
