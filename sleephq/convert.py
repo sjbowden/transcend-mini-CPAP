@@ -80,18 +80,34 @@ def session_metrics(s):
         "leak_avg": mean(leak_avg) if leak_avg else 0.0,
         "leak_max": max(vals(T_LEAK_MAX) or leak_avg or [0.0]),
         "events": sorted(apnea_evs + hypop_evs),
+        # Snore/flow-limit are ONE end-of-session summary ratio each (not a time series) —
+        # see PROTOCOL.md event phases. Take the session's value (0 if none logged).
+        "snore": (vals(T_SNORE) or [0.0])[-1],
+        "flowlim": (vals(T_FLOWLIM) or [0.0])[-1],
+        # raw periodic sample lists, for app-style nearest-rank percentiles in build_str
+        "pavg_samples": pavg,                 # PressureAverage (cmH2O), ~5-min cadence
+        "leak_samples": leak_avg,             # AverageLeak (L/min), ~5-min cadence
         # time series of (datetime, physical value) for the detail-graph channels
         "pressure_pts": sorted([(s["start"], s["start_pressure"])]
                                + [(e["dt"], e["value"]) for e in evs if e["type"] in T_PRESS_CHANGE]),
         "leak_pts": sorted((e["dt"], e["value"] / 60.0) for e in evs if e["type"] == T_LEAK_AVG),
-        "snore_pts": sorted((e["dt"], e["value"]) for e in evs if e["type"] == T_SNORE),
-        "flowlim_pts": sorted((e["dt"], e["value"]) for e in evs if e["type"] == T_FLOWLIM),
     }
 
 
 def resmed_day(dt):
-    """ResMed noon-to-noon session day for a start datetime."""
+    """ResMed noon-to-noon session day for a start datetime.
+    Equivalent to the app's GetSessionDate with cutoffHour=12 (see PROTOCOL.md)."""
     return (dt - timedelta(hours=12)).date()
+
+
+def pctile(samples, p):
+    """Nearest-rank percentile matching the official app's desktop method:
+    sorted[round(p*n) - 1] (round-half-up), clamped. Returns None if no samples."""
+    s = sorted(samples)
+    if not s:
+        return None
+    k = max(1, min(len(s), int(p * len(s) + 0.5)))
+    return s[k - 1]
 
 
 def stepper(points, start, default):
@@ -214,19 +230,37 @@ def build_str(days_sorted, out_path, serial):
 
         pmin_used = min(m["pmin_used"] for m in sessions)
         pmax_used = max(m["pmax_used"] for m in sessions)
-        pavg = mean([m["pavg"] for m in sessions])
         setv("S.A.MinPress", min(m["pmin_set"] for m in sessions))
         setv("S.A.MaxPress", max(m["pmax_set"] for m in sessions))
-        for lbl, v in [("BlowPress.95", pmax_used), ("BlowPress.5", pmin_used),
-                       ("MaskPress.50", pavg), ("MaskPress.95", pmax_used), ("MaskPress.Max", pmax_used),
-                       ("TgtIPAP.50", pavg), ("TgtIPAP.95", pmax_used), ("TgtIPAP.Max", pmax_used),
-                       ("TgtEPAP.50", pavg), ("TgtEPAP.95", pmax_used), ("TgtEPAP.Max", pmax_used)]:
+
+        # Pool the day's periodic samples; use app-style nearest-rank percentiles
+        # (PROTOCOL.md "How the official app computes its numbers"), falling back to the
+        # used-range proxies for short sessions that logged no periodic samples.
+        pres_samples = [v for m in sessions for v in m["pavg_samples"]]   # cmH2O
+        leak_samples = [v for m in sessions for v in m["leak_samples"]]   # L/min
+
+        def pp(p, fallback):
+            v = pctile(pres_samples, p)
+            return v if v is not None else fallback
+        p50 = pp(0.50, mean([m["pavg"] for m in sessions]))
+        p95 = pp(0.95, pmax_used)
+        p05 = pp(0.05, pmin_used)
+        pmax_p = max(pres_samples) if pres_samples else pmax_used
+        for lbl, v in [("BlowPress.95", p95), ("BlowPress.5", p05),
+                       ("MaskPress.50", p50), ("MaskPress.95", p95), ("MaskPress.Max", pmax_p),
+                       ("TgtIPAP.50", p50), ("TgtIPAP.95", p95), ("TgtIPAP.Max", pmax_p),
+                       ("TgtEPAP.50", p50), ("TgtEPAP.95", p95), ("TgtEPAP.Max", pmax_p)]:
             setv(lbl, v)
 
-        leak_avg = mean([m["leak_avg"] for m in sessions]) / 60.0   # L/min -> L/s
-        leak_max = max(m["leak_max"] for m in sessions) / 60.0
-        setv("Leak.50", leak_avg); setv("Leak.70", leak_avg)
-        setv("Leak.95", leak_max); setv("Leak.Max", leak_max)
+        def lk(p, fallback):            # leak percentile, L/min -> L/s
+            v = pctile(leak_samples, p)
+            return (v if v is not None else fallback) / 60.0
+        leak_avg_fb = mean([m["leak_avg"] for m in sessions])
+        leak_max_fb = max(m["leak_max"] for m in sessions)
+        setv("Leak.50", lk(0.50, leak_avg_fb))
+        setv("Leak.70", lk(0.70, leak_avg_fb))
+        setv("Leak.95", lk(0.95, leak_max_fb))
+        setv("Leak.Max", (max(leak_samples) if leak_samples else leak_max_fb) / 60.0)
 
         setv("AHI", ai + hi); setv("AI", ai); setv("HI", hi); setv("OAI", ai)
         for lbl in ZERO + OFF:
@@ -315,8 +349,10 @@ def main():
             # time-varying channels from the event log (step functions over the night)
             press_f = stepper(m["pressure_pts"], start, m["pavg"])
             leak_f = interp(m["leak_pts"], start, leak_lps)   # 5-min average -> sloped, not staircase
-            snore_f = stepper(m["snore_pts"], start, 0.0)
-            flow_f = stepper(m["flowlim_pts"], start, 0.0)
+            # snore/flow-limit are a single whole-night ratio (logged at session end), not a
+            # time series -> render as a flat line at that value rather than a spurious end spike.
+            snore_f = m["snore"]
+            flow_f = m["flowlim"]
             # BRP: flow not recorded by Transcend (->0); pressure follows the APAP curve
             edflib.write_signal_edf(os.path.join(folder, f"{ts}_BRP.edf"), BRP_TEMPLATE,
                                     start, serial, dur_sec, {"Press.40ms": press_f})
