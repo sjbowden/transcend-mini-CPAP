@@ -59,10 +59,15 @@ WRITE_ACK = "R55"
 
 COMFORT = {"EZEX", "RampDurationMinutes", "StartingRampPressure"}
 PRESCRIPTION = {"MinimumTherapyPressure", "MaximumTherapyPressure", "StartingTherapyPressure"}
-RANGES = {  # physical validation
+RANGES = {  # physical validation (ranges confirmed against the iOS app's limits)
     "MinimumTherapyPressure": (4.0, 20.0), "MaximumTherapyPressure": (4.0, 20.0),
-    "StartingTherapyPressure": (4.0, 20.0), "StartingRampPressure": (4.0, 20.0),
+    "StartingTherapyPressure": (4.0, 20.0), "StartingRampPressure": (4.0, 10.0),
     "RampDurationMinutes": (0, 45), "EZEX": (0, 3),
+}
+# The iOS app's user-facing names for the settings it exposes (shown alongside in --show).
+APP_NAMES = {
+    "EZEX": "AirRelief", "StartingRampPressure": "GentleRise Pressure",
+    "RampDurationMinutes": "GentleRise Duration",
 }
 
 
@@ -202,7 +207,8 @@ def print_config(cfg):
     print("Settings:")
     for name, _, _ in cfg["layout"]:
         tag = "(prescription)" if name in PRESCRIPTION else ("(comfort)" if name in COMFORT else "")
-        print(f"  {name:24} = {fmt(name, cfg['fields'][name]):28} {tag}")
+        app = f"[{APP_NAMES[name]}] " if name in APP_NAMES else ""
+        print(f"  {name:24} = {fmt(name, cfg['fields'][name]):28} {app}{tag}")
 
 
 def snapshot_dict(cfg):

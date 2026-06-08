@@ -81,9 +81,15 @@ the serial**: `A`=StandardCPAP, `B`=AutoPAP, `C`=CPAP+EZEX. The same transport a
 (StandardCPAP layout: StartingTherapyPressure(4), ConfigurationData(28), RampDuration(4),
 Reserved(4), StartingRampPressure(4) — no min/max.) Hex is uppercase, left-padded to the
 field width (`CommandArgumentFormatter`: `int(value·scale).ToString("X")`). The two opaque
-fields encode comfort feature‑flags (auto‑on/off, altitude, alerts) and **must be written
-back verbatim** — change them only via measured bit‑diffing. Calibration `Tb4` is writable
-but **must not be touched** (it recalibrates the pressure sensor).
+fields (`ConfigurationData`, `Reserved`) **must be written back verbatim**. They appear to
+be a **factory/firmware‑fixed** block (`ConfigurationData` carries an `aa55` magic marker):
+the iOS app exposes only the named fields below, so no user setting changes them, and they
+can't be bit‑mapped by diffing. Calibration `Tb4` is writable but **must not be touched**
+(it recalibrates the pressure sensor).
+
+**iOS-app names** for the user-changeable fields (the app gates the prescription pressures):
+`EZEX` = **AirRelief** (0–3); `StartingRampPressure` = **GentleRise Pressure** (4–10 cmH₂O);
+`RampDurationMinutes` = **GentleRise Duration** (0 = disabled, to 45 min in 5‑min steps).
 
 ## Download algorithm (from `TranSyncManager.GetEventStrings`)
 1. `Ta8` → `address`.

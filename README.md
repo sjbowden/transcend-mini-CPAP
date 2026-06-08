@@ -129,9 +129,16 @@ python3 settings.py --port COM3 --set-min 11 --set-max 14 --allow-prescription
 > clinician‑set values — changing them is your responsibility; verify with your provider.
 > Calibration is never writable. Every write is reversible via the auto‑saved backup.
 
-To map the comfort flags hidden in the opaque `ConfigurationData` blob (auto‑on/off,
-altitude, alerts): `--snapshot` before, toggle the one setting in the official app/device
-menu, `--snapshot` after, then `--diff` to see which byte/bit moved.
+### The opaque `ConfigurationData` blob
+
+The config response carries a 15‑char opaque blob (`0000aa5501006e1`) with an `aa55` magic
+marker. We tried to map its bits by differential diffing, but the iOS app turns out to
+expose **only named fields** — *AirRelief* (=`EZEX`), *GentleRise Pressure*
+(=`StartingRampPressure`), *GentleRise Duration* (=`RampDurationMinutes`), and the
+(locked) prescription pressures. There is **no** auto‑start/stop or alert toggle, so
+nothing the user can change writes the blob: it's a **factory/firmware‑fixed** block, not
+user‑mappable. `--snapshot`/`--diff` remain useful to *confirm* that every write preserves
+it verbatim (they do).
 
 ## How it was reverse‑engineered
 

@@ -55,6 +55,9 @@ more of what the Transcend actually records. Legend:
 - ❌ Central vs obstructive apnea — device doesn't classify; all apneas map to Obstructive.
 - ❌ SpO2 — no oximetry source (STR SpO2 fields stay -1).
 
-## Unrelated / parked
-- Blob comfort-flag mapping: snapshot → toggle one device-menu setting in the mobile app
-  → `settings.py --diff`. (Device firmware owns the blob; the Windows app can't decode it.)
+## Closed
+- **Blob comfort-flag mapping — not achievable, closed.** The iOS app exposes only named
+  fields (AirRelief=EZEX, GentleRise Pressure/Duration, locked prescription pressures) and
+  no auto-start/stop/alert toggle, so *no user setting writes the `ConfigurationData` blob*.
+  It's a factory/firmware-fixed block (`aa55` magic) — can't be diff-mapped. `--snapshot`/
+  `--diff` stay useful only to confirm writes preserve it verbatim.
