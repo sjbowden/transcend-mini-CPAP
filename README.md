@@ -42,6 +42,7 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 | `parse.py` | Decodes the event log → `events.csv`, `sessions.csv`, and a printed summary |
 | `sleephq/convert.py` | Converts the parsed sessions into a ResMed‑format SD‑card tree SleepHQ can ingest |
 | `sleephq/edf.py` | Minimal EDF/EDF+ reader + ResMed‑flavoured writer (per‑record CRC‑16/CCITT) |
+| `sleephq/templates/` | Bundled header‑only, PHI‑stripped ResMed EDF templates (STR/BRP/PLD) so the converter is self‑contained |
 
 Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 
@@ -83,10 +84,9 @@ session `BRP/PLD/EVE/CSL` files). Since SleepHQ has no Transcend parser, the dat
 encoded as a **ResMed AirSense 11** using the Transcend's own serial number, so it
 appears as a separate machine (rename it / set your day‑split in the SleepHQ UI).
 
-> **Template dependency:** the converter clones the EDF *headers* of real ResMed files
-> as format templates, so it needs a real ResMed SD card present (by default under
-> `~/cpap/data/`: `STR.edf` plus one `*_BRP.edf` and one `*_PLD.edf`). It does **not**
-> copy any therapy data from them — only the structural headers.
+> **Self‑contained:** the EDF format templates ship in [`sleephq/templates/`](sleephq/templates/)
+> — header‑only, PHI‑stripped ResMed signal definitions (no serial, no patient data, no
+> therapy records). No real ResMed machine or SD card is needed to run the converter.
 
 ### 4. Upload to SleepHQ
 Upload the generated tree via the SleepHQ API (OAuth2 password grant → create an

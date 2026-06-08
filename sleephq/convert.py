@@ -25,11 +25,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import parse as tparse  # noqa: E402
 import edf as edflib    # noqa: E402
 
-import glob
 DEFAULT_SERIAL = "TRANSCEND0"   # placeholder; real serial comes from the dump header or --serial
-TEMPLATE = os.path.expanduser("~/cpap/data/STR.edf")
-BRP_TEMPLATE = next(iter(sorted(glob.glob(os.path.expanduser("~/cpap/data/DATALOG/*/*_BRP.edf")))), None)
-PLD_TEMPLATE = next(iter(sorted(glob.glob(os.path.expanduser("~/cpap/data/DATALOG/*/*_PLD.edf")))), None)
+# Bundled, PHI-stripped ResMed EDF header templates (signal definitions only) -> self-contained.
+_TPL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+TEMPLATE = os.path.join(_TPL, "STR.edf")
+BRP_TEMPLATE = os.path.join(_TPL, "BRP.edf")
+PLD_TEMPLATE = os.path.join(_TPL, "PLD.edf")
+
+# Synthetic STR baseline (per-signal physical values for the few "settings" signals we keep;
+# everything else defaults to 0). Replaces cloning a real ResMed record as a donor.
+STR_BASELINE = {
+    "Mode": 1,                  # AutoSet / APAP
+    "S.C.StartPress": 4.0, "S.C.Press": 4.0, "S.A.StartPress": 4.0,
+    "S.AFH.StartPress": 4.0, "S.AFH.MaxPress": 20.0, "S.AFH.MinPress": 4.0,
+    "S.PtAccess": 1, "S.ABFilter": 1, "S.Mask": 2, "S.Tube": 2,
+}
 EPOCH = datetime(1970, 1, 1)
 
 # Transcend event type ids
@@ -108,13 +118,15 @@ def build_str(days_sorted, out_path, serial):
         sample_off[s["label"]] = (acc, s["ns"], s["gain"], s["offset"], i)
         acc += s["ns"]
     rec_samps = acc
-    rec_bytes = rec_samps * 2
-    donor = list(struct.unpack_from(
-        "<%dh" % rec_samps, tmpl.data_raw, (tmpl.hdr["n_records"] - 1) * rec_bytes))
 
     def enc(label, phys):
         off, ns, gain, offset, _ = sample_off[label]
         return int(round((phys - offset) / gain))
+
+    # synthesize the baseline record (0s + a few constant settings); no real donor needed
+    donor = [0] * rec_samps
+    for lbl, phys in STR_BASELINE.items():
+        donor[sample_off[lbl][0]] = enc(lbl, phys)
 
     ZERO = ["Flow.95", "Flow.5", "BlowFlow.50", "AmbHumidity.50", "HumTemp.50",
             "HTubeTemp.50", "HTubePow.50", "HumPow.50", "MinVent.50", "MinVent.95",
@@ -229,8 +241,7 @@ def main():
 
     for label, tpl in [("STR.edf", TEMPLATE), ("BRP.edf", BRP_TEMPLATE), ("PLD.edf", PLD_TEMPLATE)]:
         if not tpl or not os.path.exists(tpl):
-            sys.exit(f"Template {label} not found (need a real ResMed SD card at ~/cpap/data).\n"
-                     "This converter clones real ResMed EDF headers as its format templates.")
+            sys.exit(f"Bundled template {label} missing at {tpl} (should ship in sleephq/templates/).")
 
     header, events = tparse.load_events(args.dump)
     serial = args.serial or header.get("serial") or DEFAULT_SERIAL
