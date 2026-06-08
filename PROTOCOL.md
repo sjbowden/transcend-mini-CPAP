@@ -4,6 +4,15 @@ Device: Somnetics Transcend (FTDI FT231X bridge, `VID_0403 PID_6015`).
 Source: decompiled `Somnetics.TranscendGo.*` assemblies (TranSyncGo client).
 Validated live against a real device on 2026-06-07.
 
+See [README.md](README.md) for the full toolchain (download → parse → SleepHQ upload).
+
+> **What the log contains:** discrete, time-stamped *events* and summary stats —
+> therapy start/stop, pressure changes, apneas/hypopneas, leak, snore/flow-limit ratios.
+> **What it does NOT contain:** any continuous waveform — no flow rate, mask-pressure
+> trace, respiratory rate, tidal volume, or minute ventilation. The Transcend is a
+> compliance/event recorder, not a full data-logger, so those channels are simply
+> unavailable (this is also why OSCAR never supported detailed Transcend graphs).
+
 ## Transport
 - Serial port, **38400 baud, 8 data bits, no parity, 1 stop bit** (8N1).
 - `RTS=false, DTR=false, DiscardNull=true`.
