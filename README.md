@@ -149,6 +149,13 @@ with ILSpy — the `TranSyncManager` / `ComplianceEventFactory` classes contain 
 command set, framing, and the 5‑byte event decoder. Everything was then validated live
 against a real device. Full details in [`PROTOCOL.md`](PROTOCOL.md).
 
+All of the app's assemblies have been mined (`Business`, `Data`, `Common`, `Client`, and the
+resource satellite): the wire protocol, data model, config layout, event format & logging
+phases, the cloud API, and the exact compliance/percentile math are all recovered and
+documented. Firmware version/update and Dry mode live only on the Bluetooth/iOS path, and the
+`ConfigurationData` blob is a fixed factory block — so the USB‑serial surface is fully
+characterized.
+
 ## Privacy
 
 This toolkit is **fully local** — it talks only to the device over USB and writes files on

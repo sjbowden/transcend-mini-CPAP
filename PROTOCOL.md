@@ -183,6 +183,27 @@ values) are **single whole-night summary numbers**, *not* time series — there 
 of each per session, at its end. Only `PressureAverage`/`AverageLeak` (and the pressure-change
 events) are sampled over time.
 
+## How the official app computes its numbers (for parity)
+Recovered from the decompiled compliance/charting view-models — match these to reproduce the
+app's figures exactly:
+
+- **Session** = one `StartTherapy`→`EndTherapy` pair (events time-sorted, `SupplyVoltage`
+  skipped, orphans before a start dropped, kept only if end ≥ start). No min-length filter.
+- **Day assignment** = `hour ≥ cutoffHour ? date : date−1` (default cutoff is configurable;
+  at **noon** this equals this repo's `resmed_day()` noon split exactly).
+- **Averages are time-weighted by minutes**: `AvgPressure = ΣpressureMin⁻¹·Σ(pressure·min)`
+  i.e. `TotalPressure/TotalPressureMinutes`; same for leak. (Not a plain mean of samples.)
+- **Percentiles are nearest-rank, no interpolation**: desktop uses `sorted[round(p·n)−1]`
+  (round-half-up), the mobile report uses `sorted[ceil(p·n)−1]`. Leak P95/P90 over the
+  `AverageLeak` samples; pressure P95/P90 over the pressure samples (then ÷10).
+- **AHI** = `(apneas + hypopneas) / hours`, rounded 2 dp away-from-zero; **AI**/**HI** the same.
+- **% time in apnea** = `Σ(apneaDurationSec) / (hours·3600) · 100` — which confirms the
+  **apnea/hypopnea subdata is a duration in seconds**.
+- **Pressures are stored ×10 internally** (event subdata already decoded with the ×0.1 scale).
+- **Compliance buckets**: days ≥4 h, 4–6 h, 6–8 h, ≥8 h; `%≥4h = daysWith4h / daysInRange·100`.
+- **Device type** comes from the **serial's first char** (`A`/`B`/`C`), *not* the `Tff` code
+  (`8011` is an unused opaque value).
+
 ## Cloud sync (TranSync) — the official app uploads your data
 The Windows app's `TranSyncManager` POSTs JSON to **`https://api.mytransync.com`**:
 

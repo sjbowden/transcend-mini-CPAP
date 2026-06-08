@@ -32,14 +32,15 @@ more of what the Transcend actually records. Legend:
   Min/Max **Used** (16/17) and Min/Max **Leak** (20/21) — single end-of-session values.
 
 ### Daily-summary accuracy (STR percentiles are proxies today)
-- ⚠️ **Real, time-weighted pressure percentiles.** `BlowPress.95/.5`, `MaskPress.50/.95`,
-  `TgtIPAP/EPAP` currently reuse min/max-used and a plain mean of `PressureAverage`.
-  Integrate the pressure step function over each night for true 50th/95th percentiles.
-- ⚠️ **Real leak percentiles.** `Leak.50/.70/.95/.Max` reuse avg/max for all four. Compute
-  actual percentiles from the ~5-min `AverageLeak` series, and fold in `MinimumLeak`/
-  `MaximumLeak` (events 20/21) as a per-report band.
-- ✅ **Time-weight the averages, not the event count.** Sparse events held by `stepper`
-  should weight summary stats by *duration at value*, not a uniform `mean()` of samples.
+- ⚠️ **Match the app's exact stat methods (recovered from the decompile — see PROTOCOL.md
+  "How the official app computes its numbers").** Concretely:
+  - **Percentiles = nearest-rank, no interpolation:** `sorted[round(p·n)−1]` (desktop). Use
+    for leak P95/P90 (over the `AverageLeak` samples) and pressure P95/P90 (over pressure
+    samples). Today `Leak.50/.70/.95/.Max` and `BlowPress.95/.5`/`MaskPress.*` reuse avg/max
+    or a plain mean — replace with this.
+  - **Averages = time-weighted by minutes** (`TotalX/TotalXMinutes`), not a uniform `mean()`.
+  - **AHI** = `(apneas+hypopneas)/hours` rounded 2 dp away-from-zero; AI/HI same.
+  - Fold `MinimumLeak`/`MaximumLeak` (20/21, one per session) in as a per-session band.
 
 ### Units & reconciliation (verify before trusting the graphs)
 - ✅ **Leak unit validated.** Transcend leak is L/min → ÷60 → L/s for ResMed. Confirmed
