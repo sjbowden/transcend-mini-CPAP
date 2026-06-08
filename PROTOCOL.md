@@ -31,9 +31,37 @@ See [README.md](README.md) for the full toolchain (download → parse → SleepH
 | `Ta8`| `Ra8`| Event data **address** | address(4 hex → int) |
 | `Ta9`| `Ra9`| Read compliance block  | args sent = StartAddress(4 hex UPPER) + NumBytesToRead(4 hex UPPER); response = CompData (hex) |
 
-Other commands exist (config `Tab`/`Rab`, pressure `Ta1`/`R41`, monitor `Ta3`, flow `Tc3`,
-patient hours `Tb8`, calibration `Tb3`, reset compliance `Taf`, …) but are not needed to
-pull the event log.
+Other commands exist (pressure `Ta1`/`R41`, monitor `Ta3`, flow `Tc3`, patient hours
+`Tb8`, calibration `Tb3`, reset compliance `Taf`, …) but are not needed to pull the event log.
+
+## Settings (configuration read / write)
+The device configuration is read with `Tab`→`Rab` and written with `Tcc`→`R55`
+(AutoPAP / CPAP+EZEX) or `Tac`→`R55` (StandardCPAP). **Device type = first character of
+the serial**: `A`=StandardCPAP, `B`=AutoPAP, `C`=CPAP+EZEX. The same transport as reads.
+
+> The official app's password only locks these in **its own UI** — the device firmware
+> accepts config writes with **no authentication**. `settings.py` therefore imposes the
+> boundary itself (comfort settings free; prescription pressures behind a flag).
+
+**AutoPAP / EZEX config args** (positional, big-endian hex; read scales shown, write = inverse):
+
+| Pos | Field | Len | Read | Write |
+|-----|-------|-----|------|-------|
+| 0 | StartingTherapyPressure | 4 | hex/10 | int(v·10)→hex |
+| 1 | **ConfigurationData** | 15 | opaque | passthrough |
+| 2 | MinimumTherapyPressure | 4 | hex/10 | int(v·10)→hex |
+| 3 | MaximumTherapyPressure | 4 | hex/10 | int(v·10)→hex |
+| 4 | **Reserved** | 5 | opaque | passthrough |
+| 5 | RampDurationMinutes | 4 | hex | int→hex |
+| 6 | EZEX (relief level) | 4 | hex/10 | int(v·10)→hex |
+| 7 | StartingRampPressure | 4 | hex/10 | int(v·10)→hex |
+
+(StandardCPAP layout: StartingTherapyPressure(4), ConfigurationData(28), RampDuration(4),
+Reserved(4), StartingRampPressure(4) — no min/max.) Hex is uppercase, left-padded to the
+field width (`CommandArgumentFormatter`: `int(value·scale).ToString("X")`). The two opaque
+fields encode comfort feature‑flags (auto‑on/off, altitude, alerts) and **must be written
+back verbatim** — change them only via measured bit‑diffing. Calibration `Tb4` is writable
+but **must not be touched** (it recalibrates the pressure sensor).
 
 ## Download algorithm (from `TranSyncManager.GetEventStrings`)
 1. `Ta8` → `address`.

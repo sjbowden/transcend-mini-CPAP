@@ -40,6 +40,8 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 | [`PROTOCOL.md`](PROTOCOL.md) | The reverse‑engineered serial wire protocol (commands, framing, the 5‑byte event format, all 28 event types) |
 | `collect.ps1` | Drives the serial port and downloads the raw event log → `dump.txt` |
 | `parse.py` | Decodes the event log → `events.csv`, `sessions.csv`, and a printed summary |
+| `pap.ps1` | Reusable serial transport (send a command, return the response) used by `settings.py` |
+| `settings.py` | View and (carefully) edit device settings — EZEX, ramp, pressures |
 | `sleephq/convert.py` | Converts the parsed sessions into a ResMed‑format SD‑card tree SleepHQ can ingest |
 | `sleephq/edf.py` | Minimal EDF/EDF+ reader + ResMed‑flavoured writer (per‑record CRC‑16/CCITT) |
 | `sleephq/templates/` | Bundled header‑only, PHI‑stripped ResMed EDF templates (STR/BRP/PLD) so the converter is self‑contained |
@@ -97,6 +99,39 @@ import → `POST` each file → `process_files`). Two gotchas learned the hard w
 - `content_hash` must be `md5(file_bytes + filename)`, and a ResMed import needs the
   **full per‑session file set** (`BRP/PLD/EVE/CSL`), not just `STR.edf` — otherwise it
   fails with *"some files were missing."*
+
+## Settings (read & edit)
+
+`settings.py` reads and (carefully) edits the device configuration over the same serial
+link. **Read‑only is risk‑free:**
+
+```bash
+python3 settings.py --port COM3 --show          # print all settings
+python3 settings.py --port COM3 --snapshot a.json   # save config (for blob mapping)
+python3 settings.py --port COM3 --diff a.json       # diff current vs a saved snapshot
+```
+
+Editing uses **read‑modify‑write**: it changes only the requested field, preserves the
+opaque blob verbatim, sends the write, checks the `R55` ack, then **reads back to verify**
+— and auto‑saves a timestamped backup before every write (`--restore FILE` rolls back).
+
+```bash
+python3 settings.py --port COM3 --set-ezex 2              # comfort: pressure relief 0–3
+python3 settings.py --port COM3 --set-ramp-time 20        # comfort: ramp minutes
+python3 settings.py --port COM3 --dry-run --set-ezex 3    # show exact bytes, send nothing
+python3 settings.py --port COM3 --set-min 11 --set-max 14 --allow-prescription
+```
+
+> **Safety / responsibility.** The official app's password only gates *prescription*
+> settings in its own UI — the device firmware accepts writes with **no authentication**.
+> So this tool imposes the boundary: comfort settings (EZEX, ramp) edit freely;
+> prescription pressures (min/max/start) require `--allow-prescription`. Those are
+> clinician‑set values — changing them is your responsibility; verify with your provider.
+> Calibration is never writable. Every write is reversible via the auto‑saved backup.
+
+To map the comfort flags hidden in the opaque `ConfigurationData` blob (auto‑on/off,
+altitude, alerts): `--snapshot` before, toggle the one setting in the official app/device
+menu, `--snapshot` after, then `--diff` to see which byte/bit moved.
 
 ## How it was reverse‑engineered
 
