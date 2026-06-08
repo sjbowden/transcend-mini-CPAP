@@ -89,9 +89,12 @@ def session_metrics(s):
         # raw periodic sample lists, for app-style nearest-rank percentiles in build_str
         "pavg_samples": pavg,                 # PressureAverage (cmH2O), ~5-min cadence
         "leak_samples": leak_avg,             # AverageLeak (L/min), ~5-min cadence
-        # time series of (datetime, physical value) for the detail-graph channels
+        # Pressure curve = session start + every pressure-change event (11, 23-28, the precise
+        # transitions) + the ~5-min PressureAverage samples (12, the steady-state between
+        # changes). Together they track delivered pressure far better than change-events alone.
         "pressure_pts": sorted([(s["start"], s["start_pressure"])]
-                               + [(e["dt"], e["value"]) for e in evs if e["type"] in T_PRESS_CHANGE]),
+                               + [(e["dt"], e["value"]) for e in evs
+                                  if e["type"] in T_PRESS_CHANGE or e["type"] == T_PAVG]),
         "leak_pts": sorted((e["dt"], e["value"] / 60.0) for e in evs if e["type"] == T_LEAK_AVG),
     }
 
