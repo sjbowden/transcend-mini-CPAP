@@ -11,7 +11,13 @@ Usage: python3 convert.py ../dump.txt --out out
 Notes / approximations (Transcend gives summary+events, not waveforms):
   * Appears in SleepHQ as a ResMed device (uses the Transcend's own serial) - no flow-rate graph.
   * All apneas mapped to "Obstructive Apnea" (Transcend doesn't classify obs/central).
-  * Leak assumed L/min on the Transcend side -> converted to L/s for ResMed.
+  * Leak is L/min on the Transcend side -> converted to L/s for ResMed. Scale VALIDATED
+    against the official app (6/6 night: our mean 6.5-7.0 LPM vs the app's 6.96 LPM).
+    Note ResMed "leak" = unintentional/excess leak, which is the convention this matches.
+  * Leak is a ~5-minute AVERAGE (one event per ~5 min), not 2 s like ResMed, so it can
+    never show instantaneous spikes — it's a slowly drifting envelope. We linearly
+    interpolate between the 5-min points (see interp()) so it reads as a slope, not a
+    staircase; this adds no real resolution.
 """
 import argparse
 import bisect
@@ -101,6 +107,34 @@ def stepper(points, start, default):
     def f(t):
         i = bisect.bisect_right(ts, t) - 1
         return vs[i] if i >= 0 else default   # hold the default until the first event
+    return f
+
+
+def interp(points, start, default):
+    """Like stepper() but linearly *interpolates* between points instead of holding.
+
+    Used for the leak channel: the device logs one AverageLeak every ~5 min, so a flat
+    staircase reads like an artificial ramp; sloped lines between the 5-min points look
+    truer to a slowly drifting average. (No new resolution — the data is still 5-min.)
+    Holds flat before the first point and after the last."""
+    pts = sorted((max(0.0, (dt - start).total_seconds()), v) for dt, v in points
+                 if (dt - start).total_seconds() >= -60)
+    if not pts:
+        return default
+    ts = [t for t, _ in pts]
+    vs = [v for _, v in pts]
+
+    def f(t):
+        if t <= ts[0]:
+            return vs[0]
+        if t >= ts[-1]:
+            return vs[-1]
+        i = bisect.bisect_right(ts, t) - 1
+        span = ts[i + 1] - ts[i]
+        if span <= 0:
+            return vs[i]
+        frac = (t - ts[i]) / span
+        return vs[i] + frac * (vs[i + 1] - vs[i])
     return f
 
 
@@ -280,7 +314,7 @@ def main():
             edflib.write_eve(os.path.join(folder, f"{ts}_CSL.edf"), start, [], serial)
             # time-varying channels from the event log (step functions over the night)
             press_f = stepper(m["pressure_pts"], start, m["pavg"])
-            leak_f = stepper(m["leak_pts"], start, leak_lps)
+            leak_f = interp(m["leak_pts"], start, leak_lps)   # 5-min average -> sloped, not staircase
             snore_f = stepper(m["snore_pts"], start, 0.0)
             flow_f = stepper(m["flowlim_pts"], start, 0.0)
             # BRP: flow not recorded by Transcend (->0); pressure follows the APAP curve
