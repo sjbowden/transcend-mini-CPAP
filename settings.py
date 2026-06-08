@@ -109,6 +109,45 @@ def encode_value(kind, value, length):
     return format(iv, "X").rjust(length, "0")
 
 
+def read_usage(port):
+    """Device usage counters: Tbc (blower runtime) and Tb8 (patient therapy time).
+
+    Both reply with plain comma-separated decimals (no hex), per the decompiled
+    GetBlowerTimeCommand / GetPatientHoursCommand field definitions:
+      Tbc -> Rbc<hours>,<minutes>,<seconds>                       (blower on-time)
+      Tb8 -> Rb8<h>,<m>,<s>,<#sessions>=8h>,<#6-8h>,<#4-6h>       (patient therapy)
+    The app reports the *blower* figure as "usage"; patient time is shorter (it
+    excludes ramp / mask-off / blower-on-but-not-breathing).
+    """
+    bc, b8 = pap(["Tbc", "Tb8"], port)
+    out = {}
+    if bc.startswith("Rbc"):
+        v = [int(float(x)) for x in bc[3:].split(",") if x != ""]
+        if len(v) >= 3:
+            out["blower"] = tuple(v[:3])
+    if b8.startswith("Rb8"):
+        v = [int(float(x)) for x in b8[3:].split(",") if x != ""]
+        if len(v) >= 6:
+            out["patient"], out["sessions"] = tuple(v[:3]), tuple(v[3:6])
+    return out
+
+
+def print_usage(port):
+    u = read_usage(port)
+    if not u:
+        return
+    print("Usage:")
+    if "blower" in u:
+        h, m, s = u["blower"]
+        print(f"  Blower runtime         = {h}h {m:02d}m {s:02d}s   (what the app shows as usage)")
+    if "patient" in u:
+        h, m, s = u["patient"]
+        print(f"  Patient therapy time   = {h}h {m:02d}m {s:02d}s")
+    if "sessions" in u:
+        a, b, c = u["sessions"]
+        print(f"  Session histogram      = >=8h: {a}   6-8h: {b}   4-6h: {c}")
+
+
 def read_config(port):
     """Return dict: serial, device_type, layout key, fields{name:value}, raw args."""
     tbd, tab = pap(["Tbd", "Tab"], port)
@@ -159,7 +198,7 @@ def fmt(name, value):
 
 
 def print_config(cfg):
-    print(f"Device serial : {cfg['serial']}  (type {cfg['device_type']}, fw {cfg['firmware']})")
+    print(f"Device serial : {cfg['serial']}  (type {cfg['device_type']}, fw-checksum {cfg['firmware']})")
     print("Settings:")
     for name, _, _ in cfg["layout"]:
         tag = "(prescription)" if name in PRESCRIPTION else ("(comfort)" if name in COMFORT else "")
@@ -318,6 +357,8 @@ def main():
         apply_and_write(cfg, changes, args)
     elif args.show or not (args.snapshot):
         print_config(cfg)
+        print()
+        print_usage(args.port)
 
 
 if __name__ == "__main__":

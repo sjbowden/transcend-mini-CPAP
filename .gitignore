@@ -12,3 +12,4 @@ venv/
 
 # Settings backups/snapshots (contain device serial)
 settings-backup-*.json
+blob-baseline.json

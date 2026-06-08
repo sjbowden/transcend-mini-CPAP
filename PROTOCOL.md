@@ -34,6 +34,28 @@ See [README.md](README.md) for the full toolchain (download → parse → SleepH
 Other commands exist (pressure `Ta1`/`R41`, monitor `Ta3`, flow `Tc3`, patient hours
 `Tb8`, calibration `Tb3`, reset compliance `Taf`, …) but are not needed to pull the event log.
 
+## Status / usage commands (decoded & live-validated)
+These return plain **comma-separated decimals** (not hex), one value per `ResponseArgument`:
+
+| Cmd  | Resp | Meaning            | Response args (decoded) |
+|------|------|--------------------|-------------------------|
+| `Tbc`| `Rbc`| Blower runtime     | `hours,minutes,seconds` — total blower on-time. **This is the figure the app shows as "usage."** |
+| `Tb8`| `Rb8`| Patient hours      | `hours,minutes,seconds,#sessions≥8h,#sessions6–8h,#sessions4–6h` — actual breathing time (shorter than blower time) + a session-length histogram |
+| `Tff`| `Rff`| Device type        | a 4-char code string (e.g. `8011`); the CPAP/APAP/EZEX *class* is taken from the serial's first char, not this |
+| `T6d`| `R6d`| Device state       | **opaque** — the app declares no fields and never decodes it |
+| `Ta3`| `Ra3`| Monitor data (live)| `pressureGoal×0.1, measuredPressure×0.1, lungFlow×0.1, leak×0.1, mode` — real-time only |
+| `Tc3`| `Tc3`| Flow (live)        | `hoseFlow, baselineFlow` — real-time only |
+| `T60`| `R60`| Pressure sensor    | `pressure×0.1` (live) |
+| `Tb3`| `Rb3`| Calibration offset | `sign, offset×0.1` (display only) |
+
+Example (this device): `Tbc → Rbc7,2,36` = 7 h 2 m 36 s blower; `Tb8 → Rb86,31,18,0,1,0`
+= 6 h 31 m 18 s patient time, 1 session of 6–8 h.
+
+> **Firmware version is not exposed over USB.** There is **no** get-firmware-version
+> command in the entire serial command set — the only firmware datum on the wire is the
+> **checksum** in the `Tbd` header (`FirmwareChecksum`, e.g. `ecb8`). The human-readable
+> version the *mobile* app shows (e.g. `1.6.0`) comes over Bluetooth, a separate protocol.
+
 ## Settings (configuration read / write)
 The device configuration is read with `Tab`→`Rab` and written with `Tcc`→`R55`
 (AutoPAP / CPAP+EZEX) or `Tac`→`R55` (StandardCPAP). **Device type = first character of
