@@ -14,6 +14,10 @@ See [README.md](README.md) for the full toolchain (download → parse → SleepH
 > unavailable (this is also why OSCAR never supported detailed Transcend graphs).
 
 ## Transport
+- USB‑to‑serial bridge. Two are used across hardware revisions: the **FTDI FT231X**
+  (`VID_0403 PID_6015`) and a **Silicon Labs CP210x** (`VID_10C4 PID_EA60`) — the app
+  detects either (FTDI by `Manufacturer=FTDI`+`PNPClass=Ports`, or the CP210x by its
+  description string). Your unit may enumerate as one or the other.
 - Serial port, **38400 baud, 8 data bits, no parity, 1 stop bit** (8N1).
 - `RTS=false, DTR=false, DiscardNull=true`.
 - Commands are ASCII. App writes the command **one char at a time** (device echoes each
@@ -32,7 +36,12 @@ See [README.md](README.md) for the full toolchain (download → parse → SleepH
 | `Ta9`| `Ra9`| Read compliance block  | args sent = StartAddress(4 hex UPPER) + NumBytesToRead(4 hex UPPER); response = CompData (hex) |
 
 Other commands exist (pressure `Ta1`/`R41`, monitor `Ta3`, flow `Tc3`, patient hours
-`Tb8`, calibration `Tb3`, reset compliance `Taf`, …) but are not needed to pull the event log.
+`Tb8`, calibration `Tb3`, push blower `T11`, …) but are not needed to pull the event log.
+
+> **Destructive — never sent by this toolkit:** `Taf` **Reset Compliance** erases the
+> device's event log (the official app gates it behind a confirmation prompt), and `Tb4`
+> rewrites the calibration. This toolkit is read-only except for the guarded config writes
+> in `settings.py`; it never issues `Taf` or `Tb4`.
 
 ## Status / usage commands (decoded & live-validated)
 These return plain **comma-separated decimals** (not hex), one value per `ResponseArgument`:
@@ -157,3 +166,40 @@ Let the record be bytes `b0 b1 b2 b3 b4` (hex chars 0..9).
 28 PressureIncreasedFromCommand           ×0.1
 (other) Other
 ```
+
+### When each event is logged (event → phase)
+Each event class is tagged with a phase in the decompiled `ComplianceEventFactory`, which
+tells you **when** in a session it is written — important for interpreting the stats:
+
+| Phase | Events | Meaning |
+|-------|--------|---------|
+| **Start of session** | `1` StartTherapy, `13` MinPressure**Setting**, `14` MaxPressure**Setting**, `15` EZEXLevel | a prescription snapshot at mask-on |
+| **Periodic (~5 min)** | `12` PressureAverage, `22` AverageLeak | sampled through the night → genuine time series |
+| **Detailed compliance** | `11` PressureReduced, `23`–`28` PressureIncreasedFrom* | logged when APAP changes pressure (with the reason) |
+| **End of session** | `2` EndTherapy, `16` MinPressure**Used**, `17` MaxPressure**Used**, `18` FlowLimitedRatio, `19` SnoringRatio, `20` MinLeak, `21` MaxLeak | one-per-session summary at mask-off |
+
+**Consequence:** `FlowLimitedRatio` and `SnoringRatio` (and the Min/Max **Used**/**Leak**
+values) are **single whole-night summary numbers**, *not* time series — there is exactly one
+of each per session, at its end. Only `PressureAverage`/`AverageLeak` (and the pressure-change
+events) are sampled over time.
+
+## Cloud sync (TranSync) — the official app uploads your data
+The Windows app's `TranSyncManager` POSTs JSON to **`https://api.mytransync.com`**:
+
+| Endpoint | Body | Purpose |
+|----------|------|---------|
+| `POST /deviceevents/post` | `{SerialNumber, EmailAddress, Prescription{EZEX,Min,Max,RampPressure,RampTime}, Events[]}` | upload the raw event strings + your prescription |
+| `POST /deviceevents/fetch` | `{SerialNumber, EmailAddress}` | download a device's stored data |
+
+`ServiceWrapper.CallRemote` sends only an `Accept: application/json` header — **no API key,
+token, or Authorization of any kind.** From the client side the data is identified by
+**serial + email alone** (any server-side protection is not visible in the client). This is
+the official app's behavior; **this toolkit never contacts any server — it is fully local.**
+
+## Capabilities that are Bluetooth/iOS-only (not on the USB serial link)
+- **Firmware version** (e.g. `1.6.0`) — the serial protocol exposes only a firmware
+  *checksum* (`Tbd`); the readable version is shown by the iOS app over Bluetooth.
+- **Firmware update** — performed by the iOS app over Bluetooth; there is **no** firmware-
+  update path in the Windows app or over USB serial.
+- **Dry mode** enable, and assorted app preferences (e.g. compliance cut-off hour) — set
+  app-side, never written to a device register these commands can read.

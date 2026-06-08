@@ -23,9 +23,13 @@ more of what the Transcend actually records. Legend:
   Apneas/Hypopneas/Combination/Snoring/FlowLimited/Command) are folded into the pressure
   step today but their *reason* is discarded. Emit them as EVE annotations so the
   timeline explains each pressure increase.
-- ⚠️ **Snore / flow-limit as flags.** Events 19/18 are sparse ratios (PLD time series
-  only). When the ratio crosses a threshold, also emit an event flag and populate the
-  STR snore-index (`RIN`) / flow-limit summary (currently zeroed).
+- 🐞 **Fix Snore/FlowLimit modeling — they're per-night summaries, not time series.** The
+  decompiled event phases prove `FlowLimitedRatio` (18) and `SnoringRatio` (19) are logged
+  **once per session, at its end** (confirmed: 5 sessions → 5 each). `convert.py` currently
+  builds `snore_pts`/`flowlim_pts` as PLD time-series channels, so they sit at 0 all night
+  then jump at the very end — misleading. Move them to **STR daily-summary** stats (e.g.
+  snore index `RIN`, a flow-limit summary), and drop the bogus PLD channels. Same applies to
+  Min/Max **Used** (16/17) and Min/Max **Leak** (20/21) — single end-of-session values.
 
 ### Daily-summary accuracy (STR percentiles are proxies today)
 - ⚠️ **Real, time-weighted pressure percentiles.** `BlowPress.95/.5`, `MaskPress.50/.95`,

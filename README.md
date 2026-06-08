@@ -50,8 +50,9 @@ Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 
 ## Requirements
 
-- A Transcend miniCPAP on a USB cable (enumerates as an FTDI serial port,
-  `VID_0403 PID_6015`).
+- A Transcend miniCPAP on a USB cable. Depending on hardware revision it enumerates as
+  either an **FTDI** serial port (`VID_0403 PID_6015`) or a **Silicon Labs CP210x**
+  (`VID_10C4 PID_EA60`) — both work; just point `-Port` at whichever COM port appears.
 - **Windows** (the device's COM port), or **WSL** — `collect.ps1` is driven through
   `powershell.exe`'s `System.IO.Ports`, so no `usbipd` is needed under WSL.
 - Python 3.8+ for `parse.py` / `convert.py` (standard library only).
@@ -147,6 +148,14 @@ client (a .NET ClickOnce app) by decompiling its `Somnetics.TranscendGo.*` assem
 with ILSpy — the `TranSyncManager` / `ComplianceEventFactory` classes contain the
 command set, framing, and the 5‑byte event decoder. Everything was then validated live
 against a real device. Full details in [`PROTOCOL.md`](PROTOCOL.md).
+
+## Privacy
+
+This toolkit is **fully local** — it talks only to the device over USB and writes files on
+your machine; it never contacts any server. For contrast, the official **TranscendGo** app
+uploads your event log *and* prescription to Somnetics' cloud (`api.mytransync.com`),
+identified by device serial + email with no client-side authentication (see
+[`PROTOCOL.md`](PROTOCOL.md)). Nothing here phones home.
 
 ## Disclaimer
 
