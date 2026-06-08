@@ -52,6 +52,7 @@ EPOCH = datetime(1970, 1, 1)
 T_APNEA, T_HYPOP = 9, 10
 T_PMIN_USED, T_PMAX_USED = 16, 17
 T_PMIN_SET, T_PMAX_SET = 13, 14
+T_EZEX = 15
 T_PAVG = 12
 T_LEAK_AVG, T_LEAK_MAX = 22, 21
 T_SNORE, T_FLOWLIM = 19, 18
@@ -77,6 +78,7 @@ def session_metrics(s):
         "pavg": mean(pavg) if pavg else (min(pmin_used) + max(pmax_used)) / 2,
         "pmin_set": (vals(T_PMIN_SET) or [min(pmin_used)])[-1],
         "pmax_set": (vals(T_PMAX_SET) or [max(pmax_used)])[-1],
+        "ezex": (vals(T_EZEX) or [0.0])[-1],      # AirRelief/EZEX level 0-3 -> ResMed EPR
         "leak_avg": mean(leak_avg) if leak_avg else 0.0,
         "leak_max": max(vals(T_LEAK_MAX) or leak_avg or [0.0]),
         "events": sorted(apnea_evs + hypop_evs),
@@ -182,8 +184,7 @@ def build_str(days_sorted, out_path, serial):
             "HTubeTemp.50", "HTubePow.50", "HumPow.50", "MinVent.50", "MinVent.95",
             "MinVent.Max", "RespRate.50", "RespRate.95", "RespRate.Max",
             "TidVol.50", "TidVol.95", "TidVol.Max", "CSR", "RIN", "CAI", "UAI"]
-    OFF = ["S.EPR.EPREnable", "S.EPR.ClinEnable", "S.EPR.Level", "S.HumEnable",
-           "S.ClimateControl", "S.TempEnable", "HeatedTube", "Humidifier"]
+    OFF = ["S.HumEnable", "S.ClimateControl", "S.TempEnable", "HeatedTube", "Humidifier"]
     SPO2 = ["SpO2.50", "SpO2.95", "SpO2.Max", "SpO2Thresh"]
 
     records = bytearray()
@@ -261,6 +262,15 @@ def build_str(days_sorted, out_path, serial):
         setv("Leak.70", lk(0.70, leak_avg_fb))
         setv("Leak.95", lk(0.95, leak_max_fb))
         setv("Leak.Max", (max(leak_samples) if leak_samples else leak_max_fb) / 60.0)
+
+        # EZEX/AirRelief -> ResMed EPR (exhale pressure relief). The Transcend's EZEX is the
+        # analogue of EPR; map the level (0-3) so SleepHQ shows relief when it's enabled.
+        ezex = max(int(round(m["ezex"])) for m in sessions)
+        if ezex > 0:
+            setv("S.EPR.EPREnable", 1); setv("S.EPR.ClinEnable", 1); setv("S.EPR.Level", ezex)
+        else:
+            for lbl in ("S.EPR.EPREnable", "S.EPR.ClinEnable", "S.EPR.Level"):
+                rec[sample_off[lbl][0]] = 0
 
         setv("AHI", ai + hi); setv("AI", ai); setv("HI", hi); setv("OAI", ai)
         for lbl in ZERO + OFF:

@@ -7,31 +7,31 @@ more of what the Transcend actually records. Legend:
 **✅ data already in hand** · **⚠️ needs a unit/scale check first** · **❌ blocked (device has no such data — do not fabricate)**.
 
 ### Settings fidelity — make SleepHQ's "settings" panel match the device
-- ✅ **Feed live config into STR instead of `STR_BASELINE` constants.** `build_str`
-  currently hard-codes start/min/max pressure to 4.0/20.0 and EPR off. Pull the real
-  values from `settings.py:read_config()` (min/max/start pressure, ramp time, ramp
-  pressure, EZEX) so the displayed prescription is correct.
-- ✅ **Map EZEX → ResMed EPR.** EZEX is the Transcend's pressure-relief; surface it via
-  `S.EPR.EPREnable` / `S.EPR.Level` (currently forced to 0 in the `OFF` list) so SleepHQ
-  shows relief is active. Also use the per-event `EZEXLevel` (event 15) if it varies.
-- ✅ **Ramp into STR.** Populate the ramp-enable/duration/start-pressure settings fields
-  from config + `RampStart`/`RampEnd` (events 5/6), which are currently dropped.
+- ✅ **DONE — prescription min/max from the event log.** `build_str` sets `S.A.MinPress`/
+  `S.A.MaxPress` from the per-session `MinimumPressureSetting`/`MaximumPressureSetting`
+  events (13/14), so the displayed APAP range matches the device (no live read needed — the
+  prescription is in the dump).
+- ✅ **DONE — EZEX → ResMed EPR.** Per-session `EZEXLevel` (15) drives `S.EPR.EPREnable`/
+  `S.EPR.Level` (was forced off). Verified: the 06-06 night maps to EPR Level 3 (EZEX was 3
+  then, even though the device now reads 0).
+- ⬜ **TODO — ramp into STR.** Populate ramp-enable/duration/start-pressure. We have
+  `RampStart`/`RampEnd` (5/6) timing but not the ramp *duration setting* in the event log
+  (the config blob isn't in the dump); would need a live `settings.py` read to fill these.
 
 ### Event flags — explain the pressure curve
-- ✅ **Annotate ramp period** from `RampStart`/`RampEnd` (5/6) as an EVE/CSL marker.
-- ✅ **Surface "why APAP raised pressure."** Events 23–28 (PressureIncreasedFrom
-  Apneas/Hypopneas/Combination/Snoring/FlowLimited/Command) are folded into the pressure
-  step today but their *reason* is discarded. Emit them as EVE annotations so the
-  timeline explains each pressure increase.
-- 🐞 **Fix Snore/FlowLimit modeling — they're per-night summaries, not time series.** The
-  decompiled event phases prove `FlowLimitedRatio` (18) and `SnoringRatio` (19) are logged
-  **once per session, at its end** (confirmed: 5 sessions → 5 each). `convert.py` currently
-  builds `snore_pts`/`flowlim_pts` as PLD time-series channels, so they sit at 0 all night
-  then jump at the very end — misleading. Move them to **STR daily-summary** stats (e.g.
-  snore index `RIN`, a flow-limit summary), and drop the bogus PLD channels. Same applies to
-  Min/Max **Used** (16/17) and Min/Max **Leak** (20/21) — single end-of-session values.
+- ✅ **DONE — Snore/FlowLimit fixed.** `FlowLimitedRatio` (18) and `SnoringRatio` (19) are
+  one-per-night end-of-session summaries (confirmed: 5 sessions → 5 each), so they're now a
+  flat PLD line at the night's value instead of a spurious end-of-night spike.
+- ⬜ **TODO — annotate ramp period** from `RampStart`/`RampEnd` (5/6) as an EVE/CSL marker.
+- ⬜ **TODO (speculative) — "why APAP raised pressure."** Events 23–28 (PressureIncreasedFrom
+  Apneas/Hypopneas/Combination/Snoring/FlowLimited/Command) carry the reason but it's
+  discarded. Could emit EVE annotations — but SleepHQ may not render non-standard EVE labels,
+  so verify it displays before investing.
 
-### Daily-summary accuracy (STR percentiles are proxies today)
+### Daily-summary accuracy
+- ✅ **DONE — app-exact stat methods.** Leak/pressure STR percentiles now use the app's
+  nearest-rank method over the pooled periodic samples (validated: `Leak.50` = 7.2 LPM vs the
+  app's 6.96). Details below kept for reference.
 - ⚠️ **Match the app's exact stat methods (recovered from the decompile — see PROTOCOL.md
   "How the official app computes its numbers").** Concretely:
   - **Percentiles = nearest-rank, no interpolation:** `sorted[round(p·n)−1]` (desktop). Use
