@@ -161,3 +161,54 @@ def write_eve(path, start_dt, anns, serial):
         body += ann + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
     with open(path, "wb") as f:
         f.write(header + sh + body)
+
+
+import math as _math
+
+
+def write_signal_edf(out_path, template_path, start_dt, serial, dur_sec, values, old_serial="00000000000"):
+    """Write a ResMed signal EDF (BRP/PLD/SA2) by cloning a template's signal headers.
+
+    values: dict {label: constant physical value}; any signal not listed -> 0.
+            The trailing 'Crc16' signal is computed per record automatically.
+    """
+    raw = open(template_path, "rb").read()
+    tmpl = Edf(template_path)
+    hdr_len = tmpl.hdr["hdr_bytes"]
+    head = bytearray(raw[:256])
+    sighdr = raw[256:hdr_len]
+    recdur = tmpl.hdr["rec_dur"] or 60.0
+    nrec = max(1, _math.ceil(dur_sec / recdur))
+
+    # rewrite dynamic fixed-header fields (full recording field so the date matches)
+    head[88:168] = fld(f"Startdate {start_dt.day:02d}-{_mon(start_dt)}-{start_dt.year} "
+                       f"X X X SRN={serial} MID=46 VID=3", 80)
+    head[168:176] = fld(start_dt.strftime("%d.%m.%y"), 8)
+    head[176:184] = fld(start_dt.strftime("%H.%M.%S"), 8)
+    head[236:244] = fld(str(nrec), 8)
+
+    sigs = tmpl.signals
+    crc_idx = next(i for i, s in enumerate(sigs) if s["label"] == "Crc16")
+
+    def enc(s, phys):
+        return max(-32768, min(32767, int(round((phys - s["offset"]) / s["gain"]))))
+
+    # precompute the digital sample block for each non-crc signal within one record
+    per_rec = {}
+    for i, s in enumerate(sigs):
+        if i == crc_idx:
+            continue
+        per_rec[i] = struct.pack("<%dh" % s["ns"], *([enc(s, values.get(s["label"], 0.0))] * s["ns"]))
+
+    body = bytearray()
+    for _ in range(nrec):
+        rec = bytearray()
+        for i, s in enumerate(sigs):
+            if i == crc_idx:
+                continue
+            rec += per_rec[i]
+        crc = crc_ccitt(rec)
+        rec += bytes([crc & 0xFF, (crc >> 8) & 0xFF])
+        body += rec
+    with open(out_path, "wb") as f:
+        f.write(bytes(head) + sighdr + bytes(body))

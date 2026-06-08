@@ -24,8 +24,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import parse as tparse  # noqa: E402
 import edf as edflib    # noqa: E402
 
+import glob
 DEFAULT_SERIAL = "TRANSCEND0"   # placeholder; real serial comes from the dump header or --serial
 TEMPLATE = os.path.expanduser("~/cpap/data/STR.edf")
+BRP_TEMPLATE = next(iter(sorted(glob.glob(os.path.expanduser("~/cpap/data/DATALOG/*/*_BRP.edf")))), None)
+PLD_TEMPLATE = next(iter(sorted(glob.glob(os.path.expanduser("~/cpap/data/DATALOG/*/*_PLD.edf")))), None)
 EPOCH = datetime(1970, 1, 1)
 
 # Transcend event type ids
@@ -199,10 +202,10 @@ def main():
                     help="device serial for the ResMed files (default: from dump header)")
     args = ap.parse_args()
 
-    if not os.path.exists(TEMPLATE):
-        sys.exit(f"Template STR.edf not found at {TEMPLATE}.\n"
-                 "This converter clones a real ResMed STR.edf as its format template. "
-                 "Point TEMPLATE at one, or place a ResMed STR.edf there.")
+    for label, tpl in [("STR.edf", TEMPLATE), ("BRP.edf", BRP_TEMPLATE), ("PLD.edf", PLD_TEMPLATE)]:
+        if not tpl or not os.path.exists(tpl):
+            sys.exit(f"Template {label} not found (need a real ResMed SD card at ~/cpap/data).\n"
+                     "This converter clones real ResMed EDF headers as its format templates.")
 
     header, events = tparse.load_events(args.dump)
     serial = args.serial or header.get("serial") or DEFAULT_SERIAL
@@ -230,10 +233,23 @@ def main():
         os.makedirs(folder, exist_ok=True)
         for m in daysessions:
             start = m["start"]
+            ts = start.strftime("%Y%m%d_%H%M%S")
+            dur_sec = int(m["dur_min"] * 60)
+            leak_lps = m["leak_avg"] / 60.0          # Transcend L/min -> ResMed L/s
+            # events
             anns = [(int((dt - start).total_seconds()), dur, label) for dt, dur, label in m["events"]]
             anns = [(o, d, l) for o, d, l in anns if o >= 0]
-            fn = f"{start.strftime('%Y%m%d_%H%M%S')}_EVE.edf"
-            edflib.write_eve(os.path.join(folder, fn), start, anns, serial)
+            edflib.write_eve(os.path.join(folder, f"{ts}_EVE.edf"), start, anns, serial)
+            # CSL: annotation file with just "Recording starts"
+            edflib.write_eve(os.path.join(folder, f"{ts}_CSL.edf"), start, [], serial)
+            # BRP: flow not recorded by Transcend (->0); pressure flat at session average
+            edflib.write_signal_edf(os.path.join(folder, f"{ts}_BRP.edf"), BRP_TEMPLATE,
+                                    start, serial, dur_sec, {"Press.40ms": m["pavg"]})
+            # PLD: pressure + leak from summary; respiratory channels we lack -> 0
+            edflib.write_signal_edf(os.path.join(folder, f"{ts}_PLD.edf"), PLD_TEMPLATE,
+                                    start, serial, dur_sec,
+                                    {"MaskPress.2s": m["pavg"], "Press.2s": m["pavg"],
+                                     "Leak.2s": leak_lps})
             n_eve += 1
 
     print(f"Device serial : {serial}  (written as ResMed SRN={serial})")
