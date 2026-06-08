@@ -93,6 +93,15 @@ labels for the same settings (both apps gate the prescription pressures):
 `EZEX` = **AirRelief** (0–3); `StartingRampPressure` = **GentleRise Pressure** (4–10 cmH₂O);
 `RampDurationMinutes` = **GentleRise Duration** (0 = disabled, to 45 min in 5‑min steps).
 
+**Not every device feature is on the serial link.** *Dry mode* (a post-therapy option that
+runs the blower to dry the tube and mask) has no *setting* visible here: toggling it on/off
+changes neither the config (`Tab`), the device state (`T6d`), nor the live monitor (`Ta3`)
+while idle, and it never touches the blob — the enable flag is app/Bluetooth-side. But the
+drying *cycle itself* is wire-visible after the fact: running it advanced the **blower-time**
+counter `Tbc` (+2m19s in one test) while the **patient-time** counter `Tb8` stayed put. This
+is the general rule for the two counters — `Tbc` = all blower runtime (ramp + mask-off + dry
+cycles), `Tb8` = actual breathing only — which is why blower time exceeds patient time.
+
 ## Download algorithm (from `TranSyncManager.GetEventStrings`)
 1. `Ta8` → `address`.
 2. `Ta9` with (StartAddress=address, NumBytes=50)  — primes/reads the 50-byte header region.
