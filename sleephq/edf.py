@@ -191,22 +191,28 @@ def write_signal_edf(out_path, template_path, start_dt, serial, dur_sec, values,
     crc_idx = next(i for i, s in enumerate(sigs) if s["label"] == "Crc16")
 
     def enc(s, phys):
+        phys = min(s["pmax"], max(s["pmin"], phys))          # clamp to signal's physical range
         return max(-32768, min(32767, int(round((phys - s["offset"]) / s["gain"]))))
 
-    # precompute the digital sample block for each non-crc signal within one record
-    per_rec = {}
+    # A value may be a constant OR a callable f(t_sec)->phys for time-varying channels.
+    const_block = {}
     for i, s in enumerate(sigs):
-        if i == crc_idx:
-            continue
-        per_rec[i] = struct.pack("<%dh" % s["ns"], *([enc(s, values.get(s["label"], 0.0))] * s["ns"]))
+        if i != crc_idx and not callable(values.get(s["label"], 0.0)):
+            const_block[i] = struct.pack("<%dh" % s["ns"], *([enc(s, values.get(s["label"], 0.0))] * s["ns"]))
 
     body = bytearray()
-    for _ in range(nrec):
+    for r in range(nrec):
+        t0 = r * recdur
         rec = bytearray()
         for i, s in enumerate(sigs):
             if i == crc_idx:
                 continue
-            rec += per_rec[i]
+            if i in const_block:
+                rec += const_block[i]
+            else:
+                f = values[s["label"]]
+                step = recdur / s["ns"]
+                rec += struct.pack("<%dh" % s["ns"], *(enc(s, f(t0 + k * step)) for k in range(s["ns"])))
         crc = crc_ccitt(rec)
         rec += bytes([crc & 0xFF, (crc >> 8) & 0xFF])
         body += rec

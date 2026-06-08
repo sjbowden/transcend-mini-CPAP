@@ -14,6 +14,7 @@ Notes / approximations (Transcend gives summary+events, not waveforms):
   * Leak assumed L/min on the Transcend side -> converted to L/s for ResMed.
 """
 import argparse
+import bisect
 import json
 import os
 import sys
@@ -37,6 +38,8 @@ T_PMIN_USED, T_PMAX_USED = 16, 17
 T_PMIN_SET, T_PMAX_SET = 13, 14
 T_PAVG = 12
 T_LEAK_AVG, T_LEAK_MAX = 22, 21
+T_SNORE, T_FLOWLIM = 19, 18
+T_PRESS_CHANGE = {11, 23, 24, 25, 26, 27, 28}  # PressureReduced + PressureIncreasedFrom*
 
 
 def session_metrics(s):
@@ -61,12 +64,34 @@ def session_metrics(s):
         "leak_avg": mean(leak_avg) if leak_avg else 0.0,
         "leak_max": max(vals(T_LEAK_MAX) or leak_avg or [0.0]),
         "events": sorted(apnea_evs + hypop_evs),
+        # time series of (datetime, physical value) for the detail-graph channels
+        "pressure_pts": sorted([(s["start"], s["start_pressure"])]
+                               + [(e["dt"], e["value"]) for e in evs if e["type"] in T_PRESS_CHANGE]),
+        "leak_pts": sorted((e["dt"], e["value"] / 60.0) for e in evs if e["type"] == T_LEAK_AVG),
+        "snore_pts": sorted((e["dt"], e["value"]) for e in evs if e["type"] == T_SNORE),
+        "flowlim_pts": sorted((e["dt"], e["value"]) for e in evs if e["type"] == T_FLOWLIM),
     }
 
 
 def resmed_day(dt):
     """ResMed noon-to-noon session day for a start datetime."""
     return (dt - timedelta(hours=12)).date()
+
+
+def stepper(points, start, default):
+    """Build f(t_sec)->value, a step function holding each (datetime,value) until the next.
+    Returns the scalar `default` if there are no points (write_signal_edf fills it flat)."""
+    pts = sorted((max(0.0, (dt - start).total_seconds()), v) for dt, v in points
+                 if (dt - start).total_seconds() >= -60)
+    if not pts:
+        return default
+    ts = [t for t, _ in pts]
+    vs = [v for _, v in pts]
+
+    def f(t):
+        i = bisect.bisect_right(ts, t) - 1
+        return vs[i] if i >= 0 else default   # hold the default until the first event
+    return f
 
 
 def build_str(days_sorted, out_path, serial):
@@ -242,14 +267,19 @@ def main():
             edflib.write_eve(os.path.join(folder, f"{ts}_EVE.edf"), start, anns, serial)
             # CSL: annotation file with just "Recording starts"
             edflib.write_eve(os.path.join(folder, f"{ts}_CSL.edf"), start, [], serial)
-            # BRP: flow not recorded by Transcend (->0); pressure flat at session average
+            # time-varying channels from the event log (step functions over the night)
+            press_f = stepper(m["pressure_pts"], start, m["pavg"])
+            leak_f = stepper(m["leak_pts"], start, leak_lps)
+            snore_f = stepper(m["snore_pts"], start, 0.0)
+            flow_f = stepper(m["flowlim_pts"], start, 0.0)
+            # BRP: flow not recorded by Transcend (->0); pressure follows the APAP curve
             edflib.write_signal_edf(os.path.join(folder, f"{ts}_BRP.edf"), BRP_TEMPLATE,
-                                    start, serial, dur_sec, {"Press.40ms": m["pavg"]})
-            # PLD: pressure + leak from summary; respiratory channels we lack -> 0
+                                    start, serial, dur_sec, {"Press.40ms": press_f})
+            # PLD: pressure/leak/snore/flow-limit time series; respiratory channels we lack -> 0
             edflib.write_signal_edf(os.path.join(folder, f"{ts}_PLD.edf"), PLD_TEMPLATE,
                                     start, serial, dur_sec,
-                                    {"MaskPress.2s": m["pavg"], "Press.2s": m["pavg"],
-                                     "Leak.2s": leak_lps})
+                                    {"MaskPress.2s": press_f, "Press.2s": press_f,
+                                     "Leak.2s": leak_f, "Snore.2s": snore_f, "FlowLim.2s": flow_f})
             n_eve += 1
 
     print(f"Device serial : {serial}  (written as ResMed SRN={serial})")
