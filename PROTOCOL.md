@@ -87,7 +87,9 @@ the iOS app exposes only the named fields below, so no user setting changes them
 can't be bit‑mapped by diffing. Calibration `Tb4` is writable but **must not be touched**
 (it recalibrates the pressure sensor).
 
-**iOS-app names** for the user-changeable fields (the app gates the prescription pressures):
+**App names** for the user-changeable fields. The field names above follow the **Windows**
+app (`EZEX`, `Ramp`) because they come from decompiling it; the **iOS** app uses friendlier
+labels for the same settings (both apps gate the prescription pressures):
 `EZEX` = **AirRelief** (0–3); `StartingRampPressure` = **GentleRise Pressure** (4–10 cmH₂O);
 `RampDurationMinutes` = **GentleRise Duration** (0 = disabled, to 45 min in 5‑min steps).
 

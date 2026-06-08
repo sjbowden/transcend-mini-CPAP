@@ -64,7 +64,8 @@ RANGES = {  # physical validation (ranges confirmed against the iOS app's limits
     "StartingTherapyPressure": (4.0, 20.0), "StartingRampPressure": (4.0, 10.0),
     "RampDurationMinutes": (0, 45), "EZEX": (0, 3),
 }
-# The iOS app's user-facing names for the settings it exposes (shown alongside in --show).
+# Our field names follow the *Windows* app (EZEX, Ramp) since they came from decompiling it.
+# These are the *iOS* app's user-facing names for the same settings (shown alongside in --show).
 APP_NAMES = {
     "EZEX": "AirRelief", "StartingRampPressure": "GentleRise Pressure",
     "RampDurationMinutes": "GentleRise Duration",
