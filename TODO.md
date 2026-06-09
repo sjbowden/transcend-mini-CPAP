@@ -22,16 +22,21 @@ more of what the Transcend actually records. Legend:
 - ✅ **DONE — Snore/FlowLimit fixed.** `FlowLimitedRatio` (18) and `SnoringRatio` (19) are
   one-per-night end-of-session summaries (confirmed: 5 sessions → 5 each), so they're now a
   flat PLD line at the night's value instead of a spurious end-of-night spike.
-- ⬜ **TODO — annotate ramp period** from `RampStart`/`RampEnd` (5/6) as an EVE/CSL marker.
+- ✅ **DONE — ramp drawn in the pressure curve.** The `RampStart`/`RampEnd` (5/6) window is
+  rendered as a rise from ~4 cmH₂O to therapy pressure, so the gentle-rise shows instead of a
+  flat session start. (A separate EVE/CSL ramp *marker* is still possible but redundant now.)
 - ⬜ **TODO (speculative) — "why APAP raised pressure."** Events 23–28 (PressureIncreasedFrom
   Apneas/Hypopneas/Combination/Snoring/FlowLimited/Command) carry the reason but it's
   discarded. Could emit EVE annotations — but SleepHQ may not render non-standard EVE labels,
   so verify it displays before investing.
 
 ### Daily-summary accuracy
-- ✅ **DONE — app-exact stat methods.** Leak/pressure STR percentiles now use the app's
-  nearest-rank method over the pooled periodic samples (validated: `Leak.50` = 7.2 LPM vs the
-  app's 6.96). Details below kept for reference.
+- ✅ **DONE (leak) / ⚠️ N/A (pressure) — app-exact stat methods.** *Leak* STR percentiles use
+  the app's nearest-rank method over the real `AverageLeak` samples (validated: `Leak.50` =
+  7.2 LPM vs the app's 6.96). *Pressure* has **no periodic samples on this device** (zero
+  `PressureAverage` events), so the pressure STR fields fall back to the per-session
+  Min/Max-PressureUsed — approximate, not true percentiles. `.Max` fields use the Maximum*
+  events. Details below kept for reference.
 - ⚠️ **Match the app's exact stat methods (recovered from the decompile — see PROTOCOL.md
   "How the official app computes its numbers").** Concretely:
   - **Percentiles = nearest-rank, no interpolation:** `sorted[round(p·n)−1]` (desktop). Use

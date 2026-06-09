@@ -13,9 +13,13 @@ Usage: python3 convert.py ../dump.txt --out out
 Notes / approximations (Transcend gives summary+events, not waveforms):
   * Appears in SleepHQ as a ResMed device (uses the Transcend's own serial) - no flow-rate graph.
   * All apneas mapped to "Obstructive Apnea" (Transcend doesn't classify obs/central).
-  * STR daily percentiles use the official app's method: nearest-rank percentiles over the
-    periodic samples, time-weighted averages; the ".Max" fields use the device's own
-    Maximum* events (peak leak/pressure), not the max of the 5-min averages.
+  * Leak STR percentiles use the official app's nearest-rank method over the real AverageLeak
+    samples. This device logs NO periodic pressure samples (no PressureAverage events), so the
+    pressure STR fields are derived from the per-session Minimum/MaximumPressureUsed events
+    (approximate, not true percentiles). The ".Max" fields use the device's Maximum* events.
+  * Pressure curve moves only at logged pressure-CHANGE events (11, 23-28); with no periodic
+    samples it is held flat between them. The ramp ("GentleRise") rise is drawn from the
+    RampStart/RampEnd events (4 cmH2O -> therapy pressure); otherwise a session reads flat.
   * EZEX/AirRelief level is mapped to ResMed EPR (S.EPR.*) so relief shows when enabled.
   * Snore and flow-limit are a single end-of-session ratio each (% of breaths), not a time
     series; rendered as a flat line, normalised %->fraction for ResMed's 0-1 index channels.
@@ -64,6 +68,7 @@ T_EZEX = 15
 T_PAVG = 12
 T_LEAK_AVG, T_LEAK_MAX = 22, 21
 T_SNORE, T_FLOWLIM = 19, 18
+T_RAMP_START, T_RAMP_END = 5, 6
 T_PRESS_CHANGE = {11, 23, 24, 25, 26, 27, 28}  # PressureReduced + PressureIncreasedFrom*
 
 
@@ -79,6 +84,27 @@ def session_metrics(s):
     # event subdata = duration in seconds; ResMed EVE annotations allow 0-second durations
     apnea_evs = [(e["dt"], max(0, int(round(e["value"]))), "Obstructive Apnea") for e in evs if e["type"] == T_APNEA]
     hypop_evs = [(e["dt"], max(0, int(round(e["value"]))), "Hypopnea") for e in evs if e["type"] == T_HYPOP]
+
+    # Ramp ("GentleRise"): pressure rises from the ramp start pressure up to therapy pressure
+    # between RampStart (5) and RampEnd (6). Model it as interpolated points so the curve shows
+    # the rise; otherwise the session would read flat from its starting pressure. RampStart's
+    # subdata carries the ramp start pressure (decoded x1 -> divide by 10 to cmH2O, e.g. 40->4.0).
+    rs = [(e["dt"], e["value"]) for e in evs if e["type"] == T_RAMP_START]
+    re_ = [e["dt"] for e in evs if e["type"] == T_RAMP_END]
+    ramp_pts = []
+    if rs and re_:
+        t_rs, rsv = rs[0]
+        t_re = re_[0]
+        ramp_start_p = rsv / 10.0 if rsv > 20 else rsv
+        therapy_p = s["start_pressure"]
+        total = (t_re - t_rs).total_seconds()
+        if total > 0 and therapy_p > ramp_start_p:
+            n = max(2, int(total // 30))   # ~one point every 30s across the ramp
+            ramp_pts = [(t_rs + timedelta(seconds=total * k / n),
+                         ramp_start_p + (therapy_p - ramp_start_p) * k / n) for k in range(n + 1)]
+    # Pressure curve base: the ramp rise if present, else just the flat starting pressure.
+    base_pts = ramp_pts if ramp_pts else [(s["start"], s["start_pressure"])]
+
     return {
         "start": s["start"], "end": s["end"], "dur_min": dur_min,
         "apneas": len(apnea_evs), "hypopneas": len(hypop_evs),
@@ -97,10 +123,11 @@ def session_metrics(s):
         # raw periodic sample lists, for app-style nearest-rank percentiles in build_str
         "pavg_samples": pavg,                 # PressureAverage (cmH2O), ~5-min cadence
         "leak_samples": leak_avg,             # AverageLeak (L/min), ~5-min cadence
-        # Pressure curve = session start + every pressure-change event (11, 23-28, the precise
-        # transitions) + the ~5-min PressureAverage samples (12, the steady-state between
-        # changes). Together they track delivered pressure far better than change-events alone.
-        "pressure_pts": sorted([(s["start"], s["start_pressure"])]
+        # Pressure curve = ramp rise (or flat start) + every pressure-change event (11, 23-28,
+        # the precise transitions) + any PressureAverage samples (12). NB: this device logs no
+        # PressureAverage events, so between changes the curve is held flat (correct: the device
+        # only moves pressure at logged change events).
+        "pressure_pts": sorted(base_pts
                                + [(e["dt"], e["value"]) for e in evs
                                   if e["type"] in T_PRESS_CHANGE or e["type"] == T_PAVG]),
         "leak_pts": sorted((e["dt"], e["value"] / 60.0) for e in evs if e["type"] == T_LEAK_AVG),
