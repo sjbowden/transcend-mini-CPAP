@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Decode a Transcend miniCPAP raw event-log dump (from collect.ps1) into therapy data.
 
-Usage: python3 parse.py dump.txt
-Writes events.csv (every event) and sessions.csv (per-therapy-session summary),
-and prints a summary to stdout.
+Usage: python3 parse.py dump.txt [older-dump.txt ...]
+Multiple dumps are merged (overlapping records deduplicated by queue address);
+pass them oldest-first. Writes events.csv (every event) and sessions.csv
+(per-therapy-session summary), and prints a summary to stdout.
 """
 import sys, csv
 from datetime import datetime, timezone
@@ -70,21 +71,40 @@ def parse_header(line):
     }
 
 
-def load_events(path):
-    """Read a collect.ps1 dump -> (header dict, sorted list of decoded events)."""
-    header, events = {}, []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("HEADER "):
-                header = parse_header(line)
-            elif line.startswith("BLOCK "):
-                parts = line.split()
-                comp = parts[2] if len(parts) > 2 else ""  # final block can be empty
-                for i in range(0, len(comp) - 9, 10):
-                    ev = decode_event(comp[i:i + 10])
-                    if ev:
-                        events.append(ev)
+def load_events(paths):
+    """Read one or more collect.ps1 dumps -> (header dict, sorted list of decoded events).
+
+    Multiple dumps merge safely: the device queue is append-only and re-read in full on
+    each pull, so overlapping dumps repeat records. Records are deduplicated by their
+    absolute queue address + raw bytes — NOT raw bytes alone, since two same-minute
+    events with equal subdata (e.g. two 12 s apneas) are byte-identical yet distinct.
+    Timestamps are minute-resolution, so same-minute ordering relies on queue order;
+    the stable sort below preserves it (pass dumps oldest-first)."""
+    if isinstance(paths, str):
+        paths = [paths]
+    header, events, seen = {}, [], set()
+    for path in paths:
+        with open(path) as f:
+            for lineno, line in enumerate(f):
+                line = line.strip()
+                if line.startswith("HEADER "):
+                    header = parse_header(line)   # last dump's header wins
+                elif line.startswith("BLOCK "):
+                    parts = line.split()
+                    comp = parts[2] if len(parts) > 2 else ""  # final block can be empty
+                    try:
+                        addr = int(parts[1])
+                    except (IndexError, ValueError):
+                        addr = (path, lineno)     # unknown address: never dedupe across files
+                    for i in range(0, len(comp) - 9, 10):
+                        rec = comp[i:i + 10].lower()
+                        key = (addr, i, rec) if isinstance(addr, tuple) else (addr + i // 2, rec)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        ev = decode_event(rec)
+                        if ev:
+                            events.append(ev)
     events = [e for e in events if e["dt"] is not None]
     events.sort(key=lambda e: e["dt"])
     return header, events
@@ -110,8 +130,8 @@ def build_sessions(events):
 
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else "dump.txt"
-    header, events = load_events(path)
+    paths = sys.argv[1:] if len(sys.argv) > 1 else ["dump.txt"]
+    header, events = load_events(paths)
 
     if header:
         print(f"Device serial : {header['serial']}")

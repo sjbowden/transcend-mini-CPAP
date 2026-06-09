@@ -399,7 +399,9 @@ def write_identification(path, serial):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("dump", help="Transcend dump.txt from collect.ps1")
+    ap.add_argument("dump", nargs="+",
+                    help="Transcend dump.txt from collect.ps1; several merge safely "
+                         "(deduplicated by queue address) — pass oldest-first")
     ap.add_argument("--out", default="out")
     ap.add_argument("--min-minutes", type=float, default=5.0,
                     help="drop sessions shorter than this (default 5; excludes factory/QA blips)")
