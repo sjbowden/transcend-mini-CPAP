@@ -364,8 +364,11 @@ def main():
             leak_f = interp(m["leak_pts"], start, leak_lps)   # 5-min average -> sloped, not staircase
             # snore/flow-limit are a single whole-night ratio (logged at session end), not a
             # time series -> render as a flat line at that value rather than a spurious end spike.
-            snore_f = m["snore"]
-            flow_f = m["flowlim"]
+            # The device reports them as a PERCENTAGE of breaths (PercentageOfFlowLimitedBreaths /
+            # PercentageOfBreathsWithSnoring); ResMed's Snore/FlowLim channels are 0-1 indices, so
+            # normalise %->fraction (else e.g. 1% pegs the 0-1 FlowLim channel at its maximum).
+            snore_f = m["snore"] / 100.0
+            flow_f = m["flowlim"] / 100.0
             # BRP: flow not recorded by Transcend (->0); pressure follows the APAP curve
             edflib.write_signal_edf(os.path.join(folder, f"{ts}_BRP.edf"), BRP_TEMPLATE,
                                     start, serial, dur_sec, {"Press.40ms": press_f})
