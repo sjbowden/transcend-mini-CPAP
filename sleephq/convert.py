@@ -30,6 +30,10 @@ Notes / approximations (Transcend gives summary+events, not waveforms):
     never show instantaneous spikes — it's a slowly drifting envelope. We linearly
     interpolate between the 5-min points (see interp()) so it reads as a slope, not a
     staircase; this adds no real resolution.
+  * The Transcend reports leak WITHOUT vent compensation, so its baseline tracks pressure
+    (unlike ResMed's vent-compensated *unintentional* leak). --leak-vent-compensate
+    optionally subtracts the per-session pressure->leak floor to approximate unintentional
+    leak (off by default; approximate — affects the detail graph, not the STR summary).
 """
 import argparse
 import bisect
@@ -194,6 +198,48 @@ def interp(points, start, default):
     return f
 
 
+def _call(fn, t):
+    return fn(t) if callable(fn) else fn
+
+
+def _vent_line(pairs):
+    """Fit leak = a + b*pressure to the LOWER ENVELOPE (the floor ~ vent flow) of
+    (pressure, leak) pairs: least squares through the min leak observed at each pressure
+    level. Returns (a, b)."""
+    floor = {}
+    for p, l in pairs:
+        pr = round(p, 1)
+        floor[pr] = min(l, floor.get(pr, l))
+    pts = sorted(floor.items())
+    if not pts:
+        return 0.0, 0.0
+    if len(pts) == 1:
+        return pts[0][1], 0.0                      # one pressure level -> flat floor
+    n = len(pts)
+    sx = sum(p for p, _ in pts); sy = sum(l for _, l in pts)
+    sxx = sum(p * p for p, _ in pts); sxy = sum(p * l for p, l in pts)
+    denom = n * sxx - sx * sx
+    if denom == 0:
+        return sy / n, 0.0
+    b = (n * sxy - sx * sy) / denom
+    a = (sy - b * sx) / n
+    return a, b
+
+
+def vent_compensate(raw_leak_f, press_f, leak_pts, start):
+    """Approximate ResMed-style *unintentional* leak: subtract a pressure-dependent vent
+    baseline (fit to this session's lower envelope of leak-vs-pressure) from the leak
+    function, clamped at 0. The Transcend reports leak WITHOUT vent compensation, so its
+    baseline tracks pressure; this removes that trend, leaving the excursions. Approximate —
+    the device's true mask vent curve is unknown, so this fits the empirical floor."""
+    pairs = [(_call(press_f, (dt - start).total_seconds()), lv) for dt, lv in leak_pts]
+    a, b = _vent_line(pairs)
+
+    def f(t):
+        return max(0.0, _call(raw_leak_f, t) - (a + b * _call(press_f, t)))
+    return f
+
+
 def build_str(days_sorted, out_path, serial):
     """Write STR.edf by cloning the template's last record and overriding fields."""
     import struct
@@ -353,6 +399,10 @@ def main():
                     help="only include sessions on/after this date (YYYY-MM-DD)")
     ap.add_argument("--serial", default=None,
                     help="device serial for the ResMed files (default: from dump header)")
+    ap.add_argument("--leak-vent-compensate", action="store_true",
+                    help="subtract the pressure-dependent vent baseline from the leak channel, "
+                         "approximating ResMed-style unintentional leak (off by default; "
+                         "approximate — reshapes the detail graph only, not the STR summary)")
     args = ap.parse_args()
 
     for label, tpl in [("STR.edf", TEMPLATE), ("BRP.edf", BRP_TEMPLATE), ("PLD.edf", PLD_TEMPLATE)]:
@@ -397,6 +447,8 @@ def main():
             # time-varying channels from the event log (step functions over the night)
             press_f = stepper(m["pressure_pts"], start, m["pavg"])
             leak_f = interp(m["leak_pts"], start, leak_lps)   # 5-min average -> sloped, not staircase
+            if args.leak_vent_compensate:
+                leak_f = vent_compensate(leak_f, press_f, m["leak_pts"], start)
             # snore/flow-limit are a single whole-night ratio (logged at session end), not a
             # time series -> render as a flat line at that value rather than a spurious end spike.
             # The device reports them as a PERCENTAGE of breaths (PercentageOfFlowLimitedBreaths /
