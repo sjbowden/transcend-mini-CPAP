@@ -25,9 +25,9 @@ pipeline from the device to a CSV and to a SleepHQ‑importable dataset.
 |---|---|---|
 | Usage / therapy hours | ✅ | from StartTherapy/EndTherapy events |
 | AHI, apnea & hypopnea counts | ✅ | time‑stamped events |
-| Pressure (incl. APAP changes) | ✅ | stepped curve from pressure‑change events |
-| Leak | ✅ | ~5‑minute AverageLeak reports |
-| Snore / flow‑limit ratios | ✅ (sparse) | only a few events logged per night |
+| Pressure (incl. APAP changes) | ✅ | curve from pressure‑change events + ~5‑min averages |
+| Leak | ✅ | ~5‑minute AverageLeak; peak from the MaximumLeak event |
+| Snore / flow‑limit ratios | ✅ (summary) | one whole‑night ratio each (flat line, not a trace) |
 | **Flow waveform, resp. rate, tidal volume, minute ventilation** | ❌ | **the Transcend does not record these** |
 
 The Transcend is a *compliance/event recorder*, not a full data‑logger, so the

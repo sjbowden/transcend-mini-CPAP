@@ -4,13 +4,21 @@ that SleepHQ's ResMed parser can ingest.
 
 Produces under --out:
     Identification.json
-    STR.edf                         (one record per day: usage, pressure, AHI, leak)
-    DATALOG/YYYYMMDD/<ts>_EVE.edf    (apnea/hypopnea event flags per session)
+    STR.edf                                       (one record per day: usage, pressure/leak
+                                                   percentiles, AHI, EPR settings)
+    DATALOG/YYYYMMDD/<ts>_{BRP,PLD,EVE,CSL}.edf   (per session: pressure/leak time series +
+                                                   apnea/hypopnea flags)
 
 Usage: python3 convert.py ../dump.txt --out out
 Notes / approximations (Transcend gives summary+events, not waveforms):
   * Appears in SleepHQ as a ResMed device (uses the Transcend's own serial) - no flow-rate graph.
   * All apneas mapped to "Obstructive Apnea" (Transcend doesn't classify obs/central).
+  * STR daily percentiles use the official app's method: nearest-rank percentiles over the
+    periodic samples, time-weighted averages; the ".Max" fields use the device's own
+    Maximum* events (peak leak/pressure), not the max of the 5-min averages.
+  * EZEX/AirRelief level is mapped to ResMed EPR (S.EPR.*) so relief shows when enabled.
+  * Snore and flow-limit are a single end-of-session ratio each (% of breaths), not a time
+    series; rendered as a flat line, normalised %->fraction for ResMed's 0-1 index channels.
   * Leak is L/min on the Transcend side -> converted to L/s for ResMed. Scale VALIDATED
     against the official app (6/6 night: our mean 6.5-7.0 LPM vs the app's 6.96 LPM).
     Note ResMed "leak" = unintentional/excess leak, which is the convention this matches.
