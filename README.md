@@ -46,6 +46,7 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 | `sleephq/convert.py` | Converts the parsed sessions into a ResMed‑format SD‑card tree SleepHQ can ingest |
 | `sleephq/edf.py` | Minimal EDF/EDF+ reader + ResMed‑flavoured writer (per‑record CRC‑16/CCITT) |
 | `sleephq/templates/` | Bundled header‑only, PHI‑stripped ResMed EDF templates (STR/BRP/PLD) so the converter is self‑contained |
+| `tests/` | Unit tests (decoder round‑trip, multi‑dump merge, converter end‑to‑end) — `python3 -m unittest discover -s tests`; no device needed |
 
 Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 
