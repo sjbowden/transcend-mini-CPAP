@@ -166,14 +166,14 @@ def write_eve(path, start_dt, anns, serial):
 import math as _math
 
 
-def write_signal_edf(out_path, template_path, start_dt, serial, dur_sec, values, old_serial="00000000000"):
+def write_signal_edf(out_path, template_path, start_dt, serial, dur_sec, values):
     """Write a ResMed signal EDF (BRP/PLD/SA2) by cloning a template's signal headers.
 
     values: dict {label: constant physical value}; any signal not listed -> 0.
             The trailing 'Crc16' signal is computed per record automatically.
     """
-    raw = open(template_path, "rb").read()
     tmpl = Edf(template_path)
+    raw = tmpl.raw
     hdr_len = tmpl.hdr["hdr_bytes"]
     head = bytearray(raw[:256])
     sighdr = raw[256:hdr_len]
@@ -189,6 +189,8 @@ def write_signal_edf(out_path, template_path, start_dt, serial, dur_sec, values,
 
     sigs = tmpl.signals
     crc_idx = next(i for i, s in enumerate(sigs) if s["label"] == "Crc16")
+    # the record builder skips the Crc16 slot and appends the CRC at the record's end
+    assert crc_idx == len(sigs) - 1, "template Crc16 must be the last signal"
 
     def enc(s, phys):
         phys = min(s["pmax"], max(s["pmin"], phys))          # clamp to signal's physical range

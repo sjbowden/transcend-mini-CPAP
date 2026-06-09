@@ -250,6 +250,8 @@ def build_str(days_sorted, out_path, serial):
     """Write STR.edf by cloning the template's last record and overriding fields."""
     import struct
     tmpl = edflib.Edf(TEMPLATE)              # validated reader (gain/offset, correct field order)
+    # the record packer below writes all samples but the last, then appends the CRC
+    assert tmpl.signals[-1]["label"] == "Crc16", "STR template must end with a Crc16 signal"
     raw = tmpl.raw                           # reuse the bytes Edf already read (no second read)
     nsig = tmpl.hdr["n_signals"]
     hdr_len = tmpl.hdr["hdr_bytes"]
@@ -306,14 +308,14 @@ def build_str(days_sorted, out_path, serial):
         setv("Duration", round(total_dur))
         setv("MaskEvents", len(sessions))
         # MaskOn/MaskOff arrays (minutes after noon), pad -1
-        mon_off = sample_off["MaskOn"][0]
+        mon_off, slots = sample_off["MaskOn"][0], sample_off["MaskOn"][1]
         moff_off = sample_off["MaskOff"][0]
-        for k in range(20):
+        for k in range(slots):
             rec[mon_off + k] = -1
             rec[moff_off + k] = -1
-        if len(sessions) > 20:
-            warnings.append(f"{day}: {len(sessions)} sessions, only first 20 fit ResMed MaskOn slots")
-        for k, m in enumerate(sessions[:20]):
+        if len(sessions) > slots:
+            warnings.append(f"{day}: {len(sessions)} sessions, only first {slots} fit ResMed MaskOn slots")
+        for k, m in enumerate(sessions[:slots]):
             start_wall = m["start"].replace(tzinfo=None)
             end_wall = (m["end"] or m["start"]).replace(tzinfo=None)
             rec[mon_off + k] = clamp("MaskOn", round((start_wall - noon).total_seconds() / 60), 0, 1440)
@@ -417,7 +419,15 @@ def main():
 
     header, events = tparse.load_events(args.dump)
     serial = args.serial or header.get("serial") or DEFAULT_SERIAL
-    sessions = [session_metrics(s) for s in tparse.build_sessions(events)]
+    raw_sessions = tparse.build_sessions(events)
+    # A session can be missing EndTherapy (dump taken mid-therapy, or a truncated final
+    # block): close it at its last logged event rather than dropping the whole night.
+    n_open = 0
+    for s in raw_sessions:
+        if s["end"] is None and s["evs"]:
+            s["end"] = s["evs"][-1]["dt"]
+            n_open += 1
+    sessions = [session_metrics(s) for s in raw_sessions]
     sessions = [m for m in sessions if m["end"] and m["dur_min"] >= args.min_minutes]
     if args.since:
         sessions = [m for m in sessions if resmed_day(m["start"]) >= args.since]
@@ -474,6 +484,9 @@ def main():
 
     print(f"Device serial : {serial}  (written as ResMed SRN={serial})")
     print(f"Sessions      : {len(sessions)} over {len(days_sorted)} days")
+    if n_open:
+        print(f"Note          : {n_open} session(s) had no EndTherapy event (truncated log?) "
+              "— ended at their last logged event")
     print(f"Wrote         : STR.edf ({len(days_sorted)} day-records), {n_eve} EVE files, Identification.json")
     print(f"Output dir    : {os.path.abspath(args.out)}")
     if warnings:
