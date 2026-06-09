@@ -112,6 +112,7 @@ def session_metrics(s):
 
     return {
         "start": s["start"], "end": s["end"], "dur_min": dur_min,
+        "truncated": s.get("truncated", False),   # end synthesized (no EndTherapy logged)
         "apneas": len(apnea_evs), "hypopneas": len(hypop_evs),
         "pmin_used": min(pmin_used), "pmax_used": max(pmax_used),
         "pavg": mean(pavg) if pavg else (min(pmin_used) + max(pmax_used)) / 2,
@@ -424,15 +425,15 @@ def main():
     raw_sessions = tparse.build_sessions(events)
     # A session can be missing EndTherapy (dump taken mid-therapy, or a truncated final
     # block): close it at its last logged event rather than dropping the whole night.
-    n_open = 0
     for s in raw_sessions:
         if s["end"] is None and s["evs"]:
             s["end"] = s["evs"][-1]["dt"]
-            n_open += 1
+            s["truncated"] = True
     sessions = [session_metrics(s) for s in raw_sessions]
     sessions = [m for m in sessions if m["end"] and m["dur_min"] >= args.min_minutes]
     if args.since:
         sessions = [m for m in sessions if resmed_day(m["start"]) >= args.since]
+    n_open = sum(1 for m in sessions if m["truncated"])   # count only sessions actually emitted
     if not sessions:
         sys.exit("No sessions left after filtering (try --min-minutes 0 or an earlier --since).")
 
