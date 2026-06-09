@@ -7,6 +7,7 @@
 #   ./pipeline.sh                 # pull -> convert -> upload (all data on the device)
 #   ./pipeline.sh --no-upload     # pull + convert only (inspect sleephq/out first)
 #   ./pipeline.sh --no-pull       # reuse the existing dump.txt (skip the device)
+#   ./pipeline.sh --no-convert    # skip the convert stage (re-upload existing out/)
 #   ./pipeline.sh --dry-run       # convert, then show what WOULD upload (sends nothing)
 #   PORT=COM4 ./pipeline.sh       # device on a different COM port (default COM3)
 #   SLEEPHQ_UPLOADER=/path/to/sleephq_upload.py ./pipeline.sh
@@ -28,7 +29,7 @@ for a in "$@"; do
     --no-convert) convert=0 ;;
     --no-upload)  upload=0 ;;
     --dry-run)    dry="--dry-run" ;;
-    -h|--help)    sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "unknown arg: $a (try --help)" >&2; exit 2 ;;
   esac
 done
