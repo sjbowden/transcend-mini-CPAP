@@ -32,9 +32,9 @@ Notes / approximations (Transcend gives summary+events, not waveforms):
     staircase; this adds no real resolution.
   * The Transcend reports leak WITHOUT vent compensation, so its raw baseline tracks pressure
     (unlike ResMed's vent-compensated *unintentional* leak). By DEFAULT the leak graph is
-    vent-compensated: subtract the per-session pressure->leak floor to approximate
-    unintentional leak (--raw-leak keeps the uncompensated value). Approximate, and it
-    reshapes the detail graph only — the STR summary leak stats stay raw (match the app).
+    vent-compensated: subtract only the pressure-DEPENDENT trend (slope × pressure-above-min),
+    keeping the absolute leak level so a uniformly leaky night is not hidden (--raw-leak keeps
+    the uncompensated value). Approximate; reshapes the detail graph only (STR summary stays raw).
 """
 import argparse
 import bisect
@@ -228,16 +228,21 @@ def _vent_line(pairs):
 
 
 def vent_compensate(raw_leak_f, press_f, leak_pts, start):
-    """Approximate ResMed-style *unintentional* leak: subtract a pressure-dependent vent
-    baseline (fit to this session's lower envelope of leak-vs-pressure) from the leak
-    function, clamped at 0. The Transcend reports leak WITHOUT vent compensation, so its
-    baseline tracks pressure; this removes that trend, leaving the excursions. Approximate —
-    the device's true mask vent curve is unknown, so this fits the empirical floor."""
+    """Approximate ResMed-style *unintentional* leak by flattening the pressure-dependent
+    vent trend. Subtract ONLY the pressure-correlated component — baseline(p) = b·(p − p_min),
+    where b is the slope of the leak floor vs pressure (from _vent_line). This removes the
+    rise-with-pressure (vent) trend but KEEPS the absolute leak level, so a uniformly leaky
+    night is *not* hidden (subtracting the whole floor would zero it out). Clamped to [0, raw]
+    so it can neither inflate the leak (negative baseline) nor drop below 0. Approximate — the
+    device's true mask vent curve is unknown, so the slope is fit empirically per session."""
     pairs = [(_call(press_f, (dt - start).total_seconds()), lv) for dt, lv in leak_pts]
-    a, b = _vent_line(pairs)
+    _, b = _vent_line(pairs)
+    p_min = min((p for p, _ in pairs), default=0.0)
 
     def f(t):
-        return max(0.0, _call(raw_leak_f, t) - (a + b * _call(press_f, t)))
+        raw = _call(raw_leak_f, t)
+        baseline = min(max(0.0, b * (_call(press_f, t) - p_min)), raw)
+        return raw - baseline
     return f
 
 
