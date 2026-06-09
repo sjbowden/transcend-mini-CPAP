@@ -154,7 +154,9 @@ def write_eve(path, start_dt, anns, serial):
     )
     body = bytearray()
     for onset, dur, label in records:
-        tal = b"+0\x14\x14\x00" + f"+{onset}\x15{dur}\x14{label}\x14\x00".encode("latin-1")
+        # EDF+ requires each data record to open with a timekeeping TAL carrying the
+        # record's own onset (real ResMed EVE files do the same), then the event TAL.
+        tal = f"+{onset}\x14\x14\x00+{onset}\x15{dur}\x14{label}\x14\x00".encode("latin-1")
         ann = tal + b"\x00" * (62 - len(tal))
         assert len(ann) == 62, f"annotation too long: {label}"
         crc = crc_ccitt(ann)
