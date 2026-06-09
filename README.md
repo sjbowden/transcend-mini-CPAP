@@ -38,6 +38,7 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 | File | Purpose |
 |---|---|
 | [`PROTOCOL.md`](PROTOCOL.md) | The reverse‑engineered serial wire protocol (commands, framing, the 5‑byte event format, all 28 event types) |
+| `pipeline.sh` | End‑to‑end orchestrator: pull → convert → upload (with stage‑skip flags) |
 | `collect.ps1` | Drives the serial port and downloads the raw event log → `dump.txt` |
 | `parse.py` | Decodes the event log → `events.csv`, `sessions.csv`, and a printed summary |
 | `pap.ps1` | Reusable serial transport (send a command, return the response) used by `settings.py` |
@@ -58,6 +59,20 @@ Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 - Python 3.8+ for `parse.py` / `convert.py` (standard library only).
 
 ## Usage
+
+### All in one: `pipeline.sh`
+The whole flow — pull from the device → convert → upload to SleepHQ — is wired together:
+```bash
+./pipeline.sh                 # pull -> convert -> upload (all data on the device)
+./pipeline.sh --no-upload     # pull + convert only (inspect sleephq/out/ first)
+./pipeline.sh --no-pull       # reuse the existing dump.txt (skip the device)
+./pipeline.sh --dry-run       # convert, then show what WOULD upload (sends nothing)
+PORT=COM4 ./pipeline.sh       # device on a different COM port
+```
+It calls the SleepHQ uploader at `~/cpap/sleephq_upload.py` (override with
+`SLEEPHQ_UPLOADER=…`), which needs credentials saved at `~/.sleephq_credentials`. Each run
+uploads *all* nights on the device as a new import; SleepHQ merges by date on its side. The
+individual stages are below.
 
 ### 1. Download the event log
 ```powershell
