@@ -249,7 +249,7 @@ def build_str(days_sorted, out_path, serial):
         p50 = pp(0.50, mean([m["pavg"] for m in sessions]))
         p95 = pp(0.95, pmax_used)
         p05 = pp(0.05, pmin_used)
-        pmax_p = max(pres_samples) if pres_samples else pmax_used
+        pmax_p = pmax_used   # peak = device's MaximumPressureUsed (17), not max of 5-min averages
         for lbl, v in [("BlowPress.95", p95), ("BlowPress.5", p05),
                        ("MaskPress.50", p50), ("MaskPress.95", p95), ("MaskPress.Max", pmax_p),
                        ("TgtIPAP.50", p50), ("TgtIPAP.95", p95), ("TgtIPAP.Max", pmax_p),
@@ -264,7 +264,7 @@ def build_str(days_sorted, out_path, serial):
         setv("Leak.50", lk(0.50, leak_avg_fb))
         setv("Leak.70", lk(0.70, leak_avg_fb))
         setv("Leak.95", lk(0.95, leak_max_fb))
-        setv("Leak.Max", (max(leak_samples) if leak_samples else leak_max_fb) / 60.0)
+        setv("Leak.Max", leak_max_fb / 60.0)   # peak = device's MaximumLeak (21), not max of averages
 
         # EZEX/AirRelief -> ResMed EPR (exhale pressure relief). The Transcend's EZEX is the
         # analogue of EPR; map the level (0-3) so SleepHQ shows relief when it's enabled.
