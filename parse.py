@@ -6,7 +6,6 @@ Writes events.csv (every event) and sessions.csv (per-therapy-session summary),
 and prints a summary to stdout.
 """
 import sys, csv
-from collections import defaultdict
 from datetime import datetime, timezone
 
 EVENT_TYPES = {
@@ -80,7 +79,8 @@ def load_events(path):
             if line.startswith("HEADER "):
                 header = parse_header(line)
             elif line.startswith("BLOCK "):
-                comp = line.split()[2]
+                parts = line.split()
+                comp = parts[2] if len(parts) > 2 else ""  # final block can be empty
                 for i in range(0, len(comp) - 9, 10):
                     ev = decode_event(comp[i:i + 10])
                     if ev:
