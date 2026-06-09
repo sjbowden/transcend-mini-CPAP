@@ -75,25 +75,35 @@ APP_NAMES = {
 # ---------------------------------------------------------------------------
 # Transport
 # ---------------------------------------------------------------------------
-def pap(commands, port):
+def pap(commands, port, required=True):
     """Run PAP commands via pap.ps1; return one response string per command.
 
     One process (one port open/close) per command — the device handles a single
     command per connection most reliably, mirroring the official app's ProcessCommand.
+    With required=False a missing/timed-out response yields "" instead of exiting.
     """
     win = PAP_PS1
     if shutil.which("wslpath"):
         win = subprocess.check_output(["wslpath", "-w", PAP_PS1], text=True).strip()
     responses = []
     for c in commands:
-        proc = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", win,
-             "-Port", port, "-Command", c],
-            capture_output=True, text=True, timeout=60,
-        )
+        try:
+            proc = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", win,
+                 "-Port", port, "-Command", c],
+                capture_output=True, text=True, timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            if required:
+                sys.exit(f"Transport error: timed out waiting for response to {c!r} on {port}.")
+            responses.append("")
+            continue
         out = [ln.rstrip("\r") for ln in proc.stdout.splitlines() if ln.strip()]
         if not out:
-            sys.exit(f"Transport error: no response to {c!r}\n{proc.stderr.strip()}")
+            if required:
+                sys.exit(f"Transport error: no response to {c!r}\n{proc.stderr.strip()}")
+            responses.append("")
+            continue
         responses.append(out[0])
     return responses
 
@@ -125,7 +135,7 @@ def read_usage(port):
     The app reports the *blower* figure as "usage"; patient time is shorter (it
     excludes ramp / mask-off / blower-on-but-not-breathing).
     """
-    bc, b8 = pap(["Tbc", "Tb8"], port)
+    bc, b8 = pap(["Tbc", "Tb8"], port, required=False)   # optional: skip if unsupported
     out = {}
     if bc.startswith("Rbc"):
         v = [int(float(x)) for x in bc[3:].split(",") if x != ""]
@@ -229,8 +239,12 @@ def save_json(obj, path):
 # ---------------------------------------------------------------------------
 def apply_and_write(cfg, changes, args):
     """changes: {field: new_value}. Validate, confirm, backup, write, verify."""
-    # validate ranges + prescription gate
+    # validate fields exist on this device type, ranges, prescription gate
+    layout_fields = {name for name, _, _ in cfg["layout"]}
     for name, val in changes.items():
+        if name not in layout_fields:
+            sys.exit(f"Refusing: {name} does not exist on this device type "
+                     f"({cfg['device_type']}, serial {cfg['serial']}).")
         lo, hi = RANGES[name]
         if not (lo <= val <= hi):
             sys.exit(f"Refusing: {name}={val} out of allowed range [{lo}, {hi}].")
@@ -302,7 +316,19 @@ def restore(path, args):
     if not args.yes and input("Proceed? type 'yes': ").strip().lower() != "yes":
         sys.exit("Aborted.")
     resp = pap([cmd], args.port)[0]
-    print("OK" if resp.startswith(WRITE_ACK) else f"FAILED: {resp!r}")
+    if not resp.startswith(WRITE_ACK):
+        sys.exit(f"Restore FAILED — device replied {resp!r} (expected {WRITE_ACK}).")
+    print(f"Device acknowledged ({resp}). Verifying...")
+    after = read_config(args.port)
+    ok = all(abs(after["fields"][n] - saved["fields"][n]) < 1e-6
+             for n, _, k in cur["layout"] if k != "opaque")
+    opaque_ok = all(after["raw"][n].lower() == saved["raw"][n].lower()
+                    for n, _, k in cur["layout"] if k == "opaque")
+    if ok and opaque_ok:
+        print("Verified: device matches the snapshot.")
+    else:
+        print("WARNING: read-back does not match the snapshot. Inspect with --show.")
+        print_config(after)
 
 
 def diff_blob(path, args):
