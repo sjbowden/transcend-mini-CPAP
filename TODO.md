@@ -62,6 +62,10 @@ more of what the Transcend actually records. Legend:
   counters `Tbc` (blower) / `Tb8` (patient time) so SleepHQ usage matches the device.
 
 ### Known hard limits (don't chase — no source data)
+- ❌ **"Mask: No mask" row in SleepHQ's Machine Settings panel** — NOT an STR field we're
+  missing. SleepHQ links each night to a mask from the user's mask list, set manually in
+  the web UI (machine type + mask are chosen when uploading by hand); the upload API has
+  no way to set it. The `S.Mask` type code (`--mask`) renders separately and works.
 - ❌ Flow waveform, respiratory rate, tidal volume, minute ventilation — the Transcend is
   an event recorder, not a data-logger. BRP/PLD respiratory channels stay 0.
 - ❌ Central vs obstructive apnea — device doesn't classify; all apneas map to Obstructive.
