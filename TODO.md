@@ -1,5 +1,19 @@
 # TODO
 
+## From the vendor manuals (see docs/NOTES.md for cites)
+
+- ⚠️ **Verify the SupplyVoltage (event 8) scale.** Power rails are 19 VDC (AC) /
+  14.8 VDC nominal (battery), so ×0.1 V/count is the leading hypothesis — mains should
+  log raw ≈ 190. Check: `grep ',8,SupplyVoltage,' events.csv` on any dump. If confirmed,
+  update PROTOCOL.md's event table and the event becomes a mains-vs-battery discriminator.
+- ⬜ **Handle multiple ramp pairs per session.** The ramp button can start a new ramp
+  mid-session (104214 p.4), but `session_metrics()` only draws the FIRST
+  `RampStart`/`RampEnd` pair — a re-ramped night renders its later ramps flat. Draw every
+  pair (and note press-and-hold *accelerates* a ramp, so short ramps are legitimate).
+- ⬜ **settings.py: enforce GentleRise Pressure ≤ Therapy Pressure − 1** (104214 p.8) —
+  the apps enforce this relative cap on top of the absolute 4–10; what the firmware
+  itself accepts is untested, so validate conservatively before writing.
+
 ## Enhancing the SleepHQ upload
 
 What the converter (`sleephq/convert.py`) emits today and how to make SleepHQ show
