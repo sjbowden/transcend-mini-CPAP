@@ -26,10 +26,11 @@ more of what the Transcend actually records. Legend:
 - ✅ **DONE — ramp drawn in the pressure curve.** The `RampStart`/`RampEnd` (5/6) window is
   rendered as a rise from ~4 cmH₂O to therapy pressure, so the gentle-rise shows instead of a
   flat session start. (A separate EVE/CSL ramp *marker* is still possible but redundant now.)
-- ⬜ **TODO (speculative) — "why APAP raised pressure."** Events 23–28 (PressureIncreasedFrom
-  Apneas/Hypopneas/Combination/Snoring/FlowLimited/Command) carry the reason but it's
-  discarded. Could emit EVE annotations — but SleepHQ may not render non-standard EVE labels,
-  so verify it displays before investing.
+- ✅ **DONE (opt-in) — "why APAP raised pressure."** Events 23–28 (PressureIncreasedFrom
+  Apneas/Hypopneas/Combination/Snoring/FlowLimited/Command) can be emitted as EVE annotations
+  via `--pressure-reason-flags` (OFF by default). Default-off because they're largely redundant
+  with the apnea/hypopnea flags + the visible pressure rise, and SleepHQ may ignore the
+  non-standard labels or count them as events (inflating totals) — enable it to check rendering.
 
 ### Daily-summary accuracy
 - ✅ **DONE (leak) / ⚠️ N/A (pressure) — app-exact stat methods.** *Leak* STR percentiles use
@@ -38,15 +39,15 @@ more of what the Transcend actually records. Legend:
   `PressureAverage` events), so the pressure STR fields fall back to the per-session
   Min/Max-PressureUsed — approximate, not true percentiles. `.Max` fields use the Maximum*
   events. Details below kept for reference.
-- ⚠️ **Match the app's exact stat methods (recovered from the decompile — see PROTOCOL.md
-  "How the official app computes its numbers").** Concretely:
-  - **Percentiles = nearest-rank, no interpolation:** `sorted[round(p·n)−1]` (desktop). Use
-    for leak P95/P90 (over the `AverageLeak` samples) and pressure P95/P90 (over pressure
-    samples). Today `Leak.50/.70/.95/.Max` and `BlowPress.95/.5`/`MaskPress.*` reuse avg/max
-    or a plain mean — replace with this.
-  - **Averages = time-weighted by minutes** (`TotalX/TotalXMinutes`), not a uniform `mean()`.
-  - **AHI** = `(apneas+hypopneas)/hours` rounded 2 dp away-from-zero; AI/HI same.
-  - Fold `MinimumLeak`/`MaximumLeak` (20/21, one per session) in as a per-session band.
+- ✅ **DONE / N-A — match the app's exact stat methods** (decompile — see PROTOCOL.md
+  "How the official app computes its numbers"):
+  - **Percentiles = nearest-rank** (`pctile`, `sorted[round(p·n)−1]`): applied to leak
+    (`Leak.50/.70/.95`); `.Max` uses the device `MaximumLeak`/`MaximumPressureUsed` events.
+    Pressure percentiles N/A — this device logs no periodic pressure samples.
+  - **Time-weighted averages:** N/A — no periodic samples to weight on this device.
+  - **AHI rounding:** moot — SleepHQ recomputes AHI from the EVE apnea/hypopnea flags, not
+    the STR `AHI` field, so the field's rounding has no observable effect.
+  - `MinimumLeak` (20): no distinct ResMed STR field for a leak floor — left unused.
 
 ### Units & reconciliation (verify before trusting the graphs)
 - ✅ **Leak unit validated.** Transcend leak is L/min → ÷60 → L/s for ResMed. Confirmed

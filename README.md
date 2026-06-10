@@ -98,6 +98,7 @@ python3 sleephq/convert.py dump.txt --out sleephq/out
 # --serial XXX      override device serial (default: taken from the dump)
 # --mask CODE       ResMed mask-type code for SleepHQ's settings panel (default 2 = pillows)
 # --raw-leak        keep raw uncompensated leak (default vent-compensates the leak graph)
+# --pressure-reason-flags  annotate why APAP raised pressure (events 23-28); off by default
 ```
 
 This writes a ResMed‑style SD‑card tree (`STR.edf`, `Identification.json`, and per

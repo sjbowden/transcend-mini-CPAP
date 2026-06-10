@@ -77,6 +77,10 @@ T_LEAK_AVG, T_LEAK_MAX = 22, 21
 T_SNORE, T_FLOWLIM = 19, 18
 T_RAMP_START, T_RAMP_END = 5, 6
 T_PRESS_CHANGE = {11, 23, 24, 25, 26, 27, 28}  # PressureReduced + PressureIncreasedFrom*
+# Why the APAP raised pressure (events 23-28) -> optional EVE annotation labels (--pressure-reason-flags)
+PRESS_REASON = {23: "Pressure increase (apnea)", 24: "Pressure increase (hypopnea)",
+                25: "Pressure increase (combination)", 26: "Pressure increase (snore)",
+                27: "Pressure increase (flow limit)", 28: "Pressure increase (command)"}
 
 
 def session_metrics(s):
@@ -131,6 +135,8 @@ def session_metrics(s):
         "leak_avg": mean(leak_avg) if leak_avg else 0.0,
         "leak_max": max(vals(T_LEAK_MAX) or leak_avg or [0.0]),
         "events": sorted(apnea_evs + hypop_evs),
+        # optional "why APAP raised pressure" annotations (events 23-28), 0-duration markers
+        "reason_evs": sorted((e["dt"], 0, PRESS_REASON[e["type"]]) for e in evs if e["type"] in PRESS_REASON),
         # Snore/flow-limit are ONE end-of-session summary ratio each (not a time series) —
         # see PROTOCOL.md event phases. Take the session's value (0 if none logged).
         "snore": (vals(T_SNORE) or [0.0])[-1],
@@ -434,6 +440,10 @@ def main():
     ap.add_argument("--mask", type=int, default=2, metavar="CODE",
                     help="ResMed S.Mask type code shown in SleepHQ's settings panel "
                          "(default 2; set to the value that renders as your mask, e.g. pillows/nasal/full)")
+    ap.add_argument("--pressure-reason-flags", action="store_true",
+                    help="add EVE annotations for why APAP raised pressure (events 23-28). OFF by "
+                         "default: SleepHQ may ignore the non-standard labels or count them as "
+                         "events (inflating totals) — enable only to check how it renders")
     ap.add_argument("--raw-leak", action="store_true",
                     help="keep the device's raw uncompensated leak (baseline tracks pressure); "
                          "default vent-compensates the leak graph to ResMed-style unintentional "
@@ -481,8 +491,9 @@ def main():
             ts = start.strftime("%Y%m%d_%H%M%S")
             dur_sec = int(m["dur_min"] * 60)
             leak_lps = m["leak_avg"] / 60.0          # Transcend L/min -> ResMed L/s
-            # events
-            anns = [(int((dt - start).total_seconds()), dur, label) for dt, dur, label in m["events"]]
+            # events (apnea/hypopnea flags); optionally also the APAP pressure-increase reasons
+            ev_list = sorted(m["events"] + m["reason_evs"]) if args.pressure_reason_flags else m["events"]
+            anns = [(int((dt - start).total_seconds()), dur, label) for dt, dur, label in ev_list]
             anns = [(o, d, l) for o, d, l in anns if o >= 0]
             edflib.write_eve(os.path.join(folder, f"{ts}_EVE.edf"), start, anns, serial)
             # CSL: annotation file with just "Recording starts"
