@@ -1,44 +1,5 @@
 # TODO
 
-## NEXT: confirm the RampStart pressure encoding (needs the ramp-night dump)
-
-**Why.** `session_metrics()` in `sleephq/convert.py` draws the ramp rise from the
-`RampStart` (5) event, whose subdata byte is the ramp start pressure — but we don't know
-whether the device stores it **raw** (`4` = 4 cmH₂O) or **×10** (`40` = 4.0 cmH₂O). The
-code currently guesses by magnitude (`ramp_start_p = rsv / 10.0 if rsv > 20 else rsv`).
-Both encodings are unambiguous for the legal 4–10 cmH₂O range, so the guess works, but it
-should be replaced with the confirmed encoding. A dump from a night with ramp enabled is
-on hand (this machine) — that settles it.
-
-**How to confirm** (no device needed, just the dump):
-```bash
-python3 parse.py path/to/ramp-night-dump.txt
-grep -n "RampStart\|RampEnd" events.csv
-```
-The `value`/`raw_subdata` columns (identical for type 5, scale 1.0) hold the answer.
-Compare against the ramp start pressure the device was configured with that night
-(`settings.py --show` → `StartingRampPressure` / "GentleRise Pressure"; factory default
-4.0). For a 4.0 cmH₂O setting: subdata ≈ **40** → ×10 encoding; subdata ≈ **4** → raw.
-
-**Then make these changes:**
-1. `sleephq/convert.py` `session_metrics()`: replace the
-   `rsv / 10.0 if rsv > 20 else rsv` heuristic with the confirmed encoding, and fix the
-   hedging comment above it ("decoded x1 -> divide by 10 to cmH2O" if ×10 confirmed).
-2. `tests/test_transcend.py`: the synthetic dump already encodes RampStart as
-   `enc(t0, 5, 40)` (×10 assumption). Make it match the confirmed encoding and add an
-   assertion that the BRP/PLD pressure curve starts at the ramp start pressure
-   (not therapy pressure) so the encoding is locked in by a test.
-3. `PROTOCOL.md`: record the confirmed subdata semantics in the event-type table for
-   type 5 — and for type 6 (`RampEnd`): note what its subdata byte carried in this dump
-   (currently assumed meaningless; the grep above shows it).
-4. While the dump is at hand: sanity-check the converted output
-   (`python3 sleephq/convert.py <dump> --out /tmp/ramp-check`) — the ramp night's
-   pressure curve should rise from the ramp start pressure over `RampStart→RampEnd`,
-   and STR `S.RampEnable`/`S.RampTime` should match the device setting.
-
-**Do NOT commit the dump** — it carries the device serial and therapy data
-(`*.txt` dumps and `events.csv` are git-ignored already; keep it that way).
-
 ## Enhancing the SleepHQ upload
 
 What the converter (`sleephq/convert.py`) emits today and how to make SleepHQ show
@@ -56,7 +17,7 @@ more of what the Transcend actually records. Legend:
 - ✅ **DONE — ramp into STR.** `build_str` now derives the ramp duration from the
   `RampStart`/`RampEnd` (5/6) events (snapped to the device's 5-min increments) and sets
   `S.RampEnable` (3=On/1=Off) + `S.RampTime` per day — no live `settings.py` read needed.
-  Start-pressure fidelity is the "NEXT" item above.
+  RampStart subdata encoding confirmed ×10 (see Closed) and locked in by a test.
 
 ### Event flags — explain the pressure curve
 - ✅ **DONE — Snore/FlowLimit fixed.** `FlowLimitedRatio` (18) and `SnoringRatio` (19) are
@@ -106,6 +67,11 @@ more of what the Transcend actually records. Legend:
 - ❌ SpO2 — no oximetry source (STR SpO2 fields stay -1).
 
 ## Closed
+- **RampStart pressure encoding confirmed (×10).** The ramp-night dump shows `RampStart` (5)
+  subdata = **40** for a configured 4.0 cmH₂O GentleRise Pressure, so the byte is the ramp
+  start pressure ×10 (÷10 → cmH₂O). `RampEnd` (6) subdata = **1** (completion flag, not a
+  pressure). Replaced the `>20` heuristic in `session_metrics()` with the confirmed ÷10,
+  documented in PROTOCOL.md, and locked in by `test_ramp_curve_starts_at_ramp_start_pressure`.
 - **Blob comfort-flag mapping — not achievable, closed.** The iOS app exposes only named
   fields (AirRelief=EZEX, GentleRise Pressure/Duration, locked prescription pressures) and
   no auto-start/stop/alert toggle, so *no user setting writes the `ConfigurationData` blob*.

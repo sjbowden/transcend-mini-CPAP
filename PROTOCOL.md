@@ -140,8 +140,8 @@ Let the record be bytes `b0 b1 b2 b3 b4` (hex chars 0..9).
 ```
 1  StartTherapy            ×0.1   (cmH2O)
 2  EndTherapy              ×1.0
-5  RampStart               ×1.0
-6  RampEnd                 ×1.0
+5  RampStart               ×1.0   subdata = ramp start pressure ×10 (40 → 4.0 cmH2O); ÷10 for cmH2O
+6  RampEnd                 ×1.0   subdata = 1 (completion flag, not a pressure)
 7  LeakReport              ×1.0
 8  SupplyVoltage           ×1.0
 9  ApneaDetected           ×1.0

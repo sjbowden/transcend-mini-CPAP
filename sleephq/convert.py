@@ -95,7 +95,8 @@ def session_metrics(s):
     # Ramp ("GentleRise"): pressure rises from the ramp start pressure up to therapy pressure
     # between RampStart (5) and RampEnd (6). Model it as interpolated points so the curve shows
     # the rise; otherwise the session would read flat from its starting pressure. RampStart's
-    # subdata carries the ramp start pressure (decoded x1 -> divide by 10 to cmH2O, e.g. 40->4.0).
+    # subdata is the ramp start pressure stored x10 (confirmed: subdata 40 = 4.0 cmH2O, matching
+    # the configured StartingRampPressure), so divide by 10. RampEnd's subdata is a flag (=1).
     rs = [(e["dt"], e["value"]) for e in evs if e["type"] == T_RAMP_START]
     re_ = [e["dt"] for e in evs if e["type"] == T_RAMP_END]
     ramp_pts = []
@@ -108,7 +109,7 @@ def session_metrics(s):
             # Snap to the device's 5-min increments — event timestamps are minute-granular,
             # so a 5-min ramp can measure as 4-6 min between RampStart/RampEnd.
             ramp_minutes = round(total / 60 / 5) * 5
-            ramp_start_p = rsv / 10.0 if rsv > 20 else rsv
+            ramp_start_p = rsv / 10.0   # subdata stored x10 (confirmed against the ramp-night dump)
             therapy_p = s["start_pressure"]
             if therapy_p > ramp_start_p:
                 n = max(2, int(total // 30))   # ~one point every 30s across the ramp

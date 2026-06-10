@@ -256,6 +256,20 @@ class TestConvertEndToEnd(unittest.TestCase):
             self.assertEqual(g("S.RampEnable"), [3, 1])       # 3 = On, 1 = Off
             self.assertEqual(g("S.RampTime"), [10, 0])        # snapped to 5-min increments
 
+    def test_ramp_curve_starts_at_ramp_start_pressure(self):
+        # Locks the RampStart subdata encoding: 40 -> 4.0 cmH2O (x10). The day-1 pressure
+        # curve must rise FROM the ramp start pressure (4.0), not begin flat at the therapy
+        # pressure (8.0 from StartTherapy sub=80). If the x10 decode regressed, this fails.
+        with tempfile.TemporaryDirectory() as d:
+            out, _ = self._run(d)
+            day = os.path.join(out, "DATALOG", "20260601")
+            pld = next(f for f in os.listdir(day) if f.endswith("PLD.edf"))
+            e = edf.Edf(os.path.join(day, pld))
+            idx = {s["label"]: i for i, s in enumerate(e.signals)}
+            press = e.signal_phys(idx["Press.2s"])
+            self.assertAlmostEqual(press[0], 4.0, delta=0.3)  # starts at the ramp start pressure
+            self.assertGreater(max(press), 7.5)               # ramps up toward therapy pressure
+
 
 if __name__ == "__main__":
     unittest.main()
