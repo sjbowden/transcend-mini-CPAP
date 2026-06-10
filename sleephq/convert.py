@@ -61,6 +61,8 @@ STR_BASELINE = {
     "Mode": 1,                  # AutoSet / APAP
     "S.C.StartPress": 4.0, "S.C.Press": 4.0, "S.A.StartPress": 4.0,
     "S.AFH.StartPress": 4.0, "S.AFH.MaxPress": 20.0, "S.AFH.MinPress": 4.0,
+    # ResMed enum encoding: 1 = No/Off, 2 = Yes/On (0 renders blank). Transcend has no
+    # AB-filter / patient-view -> "No"/"Off" = 1 (confirmed against a real AirSense 11 STR).
     "S.PtAccess": 1, "S.ABFilter": 1, "S.Mask": 2, "S.Tube": 2,
 }
 EPOCH = datetime(1970, 1, 1)
@@ -97,16 +99,21 @@ def session_metrics(s):
     rs = [(e["dt"], e["value"]) for e in evs if e["type"] == T_RAMP_START]
     re_ = [e["dt"] for e in evs if e["type"] == T_RAMP_END]
     ramp_pts = []
+    ramp_minutes = 0                       # the ramp DURATION setting, derived from the events
     if rs and re_:
         t_rs, rsv = rs[0]
         t_re = re_[0]
-        ramp_start_p = rsv / 10.0 if rsv > 20 else rsv
-        therapy_p = s["start_pressure"]
         total = (t_re - t_rs).total_seconds()
-        if total > 0 and therapy_p > ramp_start_p:
-            n = max(2, int(total // 30))   # ~one point every 30s across the ramp
-            ramp_pts = [(t_rs + timedelta(seconds=total * k / n),
-                         ramp_start_p + (therapy_p - ramp_start_p) * k / n) for k in range(n + 1)]
+        if total > 0:
+            # Snap to the device's 5-min increments — event timestamps are minute-granular,
+            # so a 5-min ramp can measure as 4-6 min between RampStart/RampEnd.
+            ramp_minutes = round(total / 60 / 5) * 5
+            ramp_start_p = rsv / 10.0 if rsv > 20 else rsv
+            therapy_p = s["start_pressure"]
+            if therapy_p > ramp_start_p:
+                n = max(2, int(total // 30))   # ~one point every 30s across the ramp
+                ramp_pts = [(t_rs + timedelta(seconds=total * k / n),
+                             ramp_start_p + (therapy_p - ramp_start_p) * k / n) for k in range(n + 1)]
     # Pressure curve base: the ramp rise if present, else just the flat starting pressure.
     base_pts = ramp_pts if ramp_pts else [(s["start"], s["start_pressure"])]
 
@@ -119,6 +126,7 @@ def session_metrics(s):
         "pmin_set": (vals(T_PMIN_SET) or [min(pmin_used)])[-1],
         "pmax_set": (vals(T_PMAX_SET) or [max(pmax_used)])[-1],
         "ezex": (vals(T_EZEX) or [0.0])[-1],      # AirRelief/EZEX level 0-3 -> ResMed EPR
+        "ramp_minutes": ramp_minutes,             # ramp/GentleRise duration (from RampStart/End)
         "leak_avg": mean(leak_avg) if leak_avg else 0.0,
         "leak_max": max(vals(T_LEAK_MAX) or leak_avg or [0.0]),
         "events": sorted(apnea_evs + hypop_evs),
@@ -247,7 +255,7 @@ def vent_compensate(raw_leak_f, press_f, leak_pts, start):
     return f
 
 
-def build_str(days_sorted, out_path, serial):
+def build_str(days_sorted, out_path, serial, mask=2):
     """Write STR.edf by cloning the template's last record and overriding fields."""
     import struct
     tmpl = edflib.Edf(TEMPLATE)              # validated reader (gain/offset, correct field order)
@@ -272,6 +280,7 @@ def build_str(days_sorted, out_path, serial):
     donor = [0] * rec_samps
     for lbl, phys in STR_BASELINE.items():
         donor[sample_off[lbl][0]] = enc(lbl, phys)
+    donor[sample_off["S.Mask"][0]] = enc("S.Mask", mask)   # mask type code (--mask)
 
     ZERO = ["Flow.95", "Flow.5", "BlowFlow.50", "AmbHumidity.50", "HumTemp.50",
             "HTubeTemp.50", "HTubePow.50", "HumPow.50", "MinVent.50", "MinVent.95",
@@ -358,12 +367,23 @@ def build_str(days_sorted, out_path, serial):
 
         # EZEX/AirRelief -> ResMed EPR (exhale pressure relief). The Transcend's EZEX is the
         # analogue of EPR; map the level (0-3) so SleepHQ shows relief when it's enabled.
+        # ResMed EPR enum (from a real AirSense 11): EPREnable/ClinEnable 1=Off 2=On,
+        # EPRType 2=Full Time, Level = cmH2O of relief.
         ezex = max(int(round(m["ezex"])) for m in sessions)
         if ezex > 0:
-            setv("S.EPR.EPREnable", 1); setv("S.EPR.ClinEnable", 1); setv("S.EPR.Level", ezex)
+            setv("S.EPR.EPREnable", 2); setv("S.EPR.ClinEnable", 2)
+            setv("S.EPR.EPRType", 2); setv("S.EPR.Level", ezex)
         else:
-            for lbl in ("S.EPR.EPREnable", "S.EPR.ClinEnable", "S.EPR.Level"):
-                rec[sample_off[lbl][0]] = 0
+            setv("S.EPR.EPREnable", 1); setv("S.EPR.ClinEnable", 1)
+            rec[sample_off["S.EPR.Level"][0]] = 0
+
+        # Ramp/GentleRise: show it as a setting when any session ramped (duration from events).
+        # ResMed S.RampEnable: 1 = Off, 3 = On (observed on a real AirSense 11); RampTime in min.
+        ramp_min = max((m["ramp_minutes"] for m in sessions), default=0)
+        if ramp_min > 0:
+            setv("S.RampEnable", 3); setv("S.RampTime", ramp_min)
+        else:
+            setv("S.RampEnable", 1)   # Off
 
         setv("AHI", ai + hi); setv("AI", ai); setv("HI", hi); setv("OAI", ai)
         for lbl in ZERO + OFF:
@@ -410,6 +430,9 @@ def main():
                     help="only include sessions on/after this date (YYYY-MM-DD)")
     ap.add_argument("--serial", default=None,
                     help="device serial for the ResMed files (default: from dump header)")
+    ap.add_argument("--mask", type=int, default=2, metavar="CODE",
+                    help="ResMed S.Mask type code shown in SleepHQ's settings panel "
+                         "(default 2; set to the value that renders as your mask, e.g. pillows/nasal/full)")
     ap.add_argument("--raw-leak", action="store_true",
                     help="keep the device's raw uncompensated leak (baseline tracks pressure); "
                          "default vent-compensates the leak graph to ResMed-style unintentional "
@@ -445,7 +468,7 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     write_identification(os.path.join(args.out, "Identification.json"), serial)
-    warnings = build_str(days_sorted, os.path.join(args.out, "STR.edf"), serial)
+    warnings = build_str(days_sorted, os.path.join(args.out, "STR.edf"), serial, mask=args.mask)
 
     # per-session EVE files
     n_eve = 0

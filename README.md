@@ -96,6 +96,8 @@ python3 sleephq/convert.py dump.txt --out sleephq/out
 # --min-minutes N   drop sessions shorter than N (default 5; excludes factory/QA blips)
 # --since YYYY-MM-DD only include sessions on/after this date
 # --serial XXX      override device serial (default: taken from the dump)
+# --mask CODE       ResMed mask-type code for SleepHQ's settings panel (default 2 = pillows)
+# --raw-leak        keep raw uncompensated leak (default vent-compensates the leak graph)
 ```
 
 This writes a ResMed‑style SD‑card tree (`STR.edf`, `Identification.json`, and per

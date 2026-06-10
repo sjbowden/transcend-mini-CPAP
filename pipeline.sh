@@ -10,6 +10,7 @@
 #   ./pipeline.sh --no-convert    # skip the convert stage (re-upload existing out/)
 #   ./pipeline.sh --dry-run       # convert, then show what WOULD upload (sends nothing)
 #   PORT=COM4 ./pipeline.sh       # device on a different COM port (default COM3)
+#   MASK=3 ./pipeline.sh          # ResMed mask-type code for SleepHQ's settings panel
 #   SLEEPHQ_UPLOADER=/path/to/sleephq_upload.py ./pipeline.sh
 #
 # Requires: Windows/WSL with the device on a COM port (for the pull stage), Python 3,
@@ -47,7 +48,7 @@ fi
 
 if [ "$convert" = 1 ]; then
   echo "==> [2/3] Converting -> $OUT ..."
-  python3 "$HERE/sleephq/convert.py" "$DUMP" --out "$OUT"
+  python3 "$HERE/sleephq/convert.py" "$DUMP" --out "$OUT" ${MASK:+--mask "$MASK"}
 else
   echo "==> [2/3] Convert skipped."
 fi
