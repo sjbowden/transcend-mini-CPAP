@@ -26,11 +26,13 @@ more of what the Transcend actually records. Legend:
 - ✅ **DONE — ramp drawn in the pressure curve.** The `RampStart`/`RampEnd` (5/6) window is
   rendered as a rise from ~4 cmH₂O to therapy pressure, so the gentle-rise shows instead of a
   flat session start. (A separate EVE/CSL ramp *marker* is still possible but redundant now.)
-- ✅ **DONE (opt-in) — "why APAP raised pressure."** Events 23–28 (PressureIncreasedFrom
+- ✅ **DONE (opt-in, verified) — "why APAP raised pressure."** Events 23–28 (PressureIncreasedFrom
   Apneas/Hypopneas/Combination/Snoring/FlowLimited/Command) can be emitted as EVE annotations
-  via `--pressure-reason-flags` (OFF by default). Default-off because they're largely redundant
-  with the apnea/hypopnea flags + the visible pressure rise, and SleepHQ may ignore the
-  non-standard labels or count them as events (inflating totals) — enable it to check rendering.
+  via `--pressure-reason-flags` (OFF by default). **Verified with a real flag-enabled upload
+  (2026-06-10): SleepHQ silently ignores the non-standard labels** — nothing renders on the
+  charts, and AHI / time-in-apnea are NOT inflated (identical to the flag-off import). So the
+  flag is harmless but has no benefit on SleepHQ; keep it off unless a future consumer
+  (e.g. OSCAR-style tooling) renders custom EVE labels.
 
 ### Daily-summary accuracy
 - ✅ **DONE (leak) / ⚠️ N/A (pressure) — app-exact stat methods.** *Leak* STR percentiles use
