@@ -163,10 +163,35 @@ class TestWriteEve(unittest.TestCase):
                           ("+5400", "0", "Hypopnea")])
 
 
+class TestNoDonorSerial(unittest.TestCase):
+    """Guard: the ResMed donor-device serial purged from git history must never return
+    (e.g. via a patch ported from a pre-rewrite clone)."""
+
+    def test_tracked_files_clean(self):
+        needle = ("23243" "362472").encode()   # split so this file doesn't trip its own scan
+        try:
+            out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT,
+                                 capture_output=True, check=True).stdout
+        except Exception:
+            self.skipTest("not a git checkout")
+        offenders = []
+        for name in filter(None, out.split(b"\x00")):
+            path = os.path.join(ROOT, name.decode())
+            with open(path, "rb") as fh:
+                if needle in fh.read():
+                    offenders.append(name.decode())
+        self.assertEqual(offenders, [], "donor serial reintroduced in tracked files")
+
+
 class TestConvertEndToEnd(unittest.TestCase):
     def _dump(self, d):
         t0 = datetime(2026, 6, 1, 22, 0)
-        recs = [enc(t0, 1, 80)]
+        recs = [enc(t0, 1, 80),
+                enc(t0, 5, 40),                            # RampStart @ 4.0 cmH2O
+                enc(t0 + timedelta(minutes=10), 6, 0),     # RampEnd -> 10 min ramp
+                enc(t0 + timedelta(minutes=15), 15, 20),   # EZEX level 2
+                enc(t0 + timedelta(minutes=15), 13, 60),   # MinimumPressureSetting 6.0
+                enc(t0 + timedelta(minutes=15), 14, 150)]  # MaximumPressureSetting 15.0
         recs += [enc(t0 + timedelta(minutes=5 * k), 22, 7) for k in range(1, 80)]
         recs += [enc(t0 + timedelta(minutes=30), 9, 12),
                  enc(t0 + timedelta(hours=7), 16, 78),
@@ -215,6 +240,21 @@ class TestConvertEndToEnd(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             _, stdout = self._run(d, "--min-minutes", "0")
             self.assertIn("2 session(s) had no EndTherapy", stdout)
+
+    def test_str_settings_panel(self):
+        # day 1 has ramp/EZEX/set-pressure events; day 2 (open session) has none
+        with tempfile.TemporaryDirectory() as d:
+            out, _ = self._run(d, "--mask", "3")
+            e = edf.Edf(os.path.join(out, "STR.edf"))
+            idx = {s["label"]: i for i, s in enumerate(e.signals)}
+            g = lambda lbl: [round(v, 3) for v in e.signal_phys(idx[lbl])]
+            self.assertEqual(g("S.Mask"), [3, 3])             # --mask code, every record
+            self.assertEqual(g("S.A.MinPress"), [6, 8])       # set events; day-2 fallback = start_pressure
+            self.assertEqual(g("S.A.MaxPress"), [15, 8])
+            self.assertEqual(g("S.EPR.EPREnable"), [2, 1])    # 2 = On, 1 = Off
+            self.assertEqual(g("S.EPR.Level"), [2, 0])
+            self.assertEqual(g("S.RampEnable"), [3, 1])       # 3 = On, 1 = Off
+            self.assertEqual(g("S.RampTime"), [10, 0])        # snapped to 5-min increments
 
 
 if __name__ == "__main__":
