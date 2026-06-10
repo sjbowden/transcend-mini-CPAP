@@ -14,9 +14,11 @@
   the first ramp). Press-and-hold accelerates a ramp, so short later ramps are kept as-is.
   (Our current dump has one ramp per session — the two pairs fall in *separate* sessions — so
   output is unchanged here; this is forward-looking robustness.) Locked by a unit test.
-- ⬜ **settings.py: enforce GentleRise Pressure ≤ Therapy Pressure − 1** (104214 p.8) —
-  the apps enforce this relative cap on top of the absolute 4–10; what the firmware
-  itself accepts is untested, so validate conservatively before writing.
+- ✅ **DONE — settings.py enforces GentleRise Pressure ≤ Therapy Pressure − 1** (104214 p.8).
+  `apply_and_write` rejects any change leaving < 1 cmH₂O headroom between StartingRampPressure
+  and the therapy pressure it ramps to (the APAP min, or the CPAP set pressure) — evaluated on
+  the merged result, so *lowering* the therapy pressure trips it too, not just raising the ramp.
+  Conservative (firmware behavior untested); validated before any device I/O. Locked by tests.
 
 ## Enhancing the SleepHQ upload
 

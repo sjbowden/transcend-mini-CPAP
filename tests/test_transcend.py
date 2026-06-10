@@ -313,5 +313,46 @@ class TestConvertEndToEnd(unittest.TestCase):
             self.assertIn(b"Pressure increase (hypopnea)", eve_bytes(out))
 
 
+class TestSettingsGentleRiseCap(unittest.TestCase):
+    """GentleRise (StartingRampPressure) must stay >=1 cmH2O below therapy pressure
+    (104214 p.8). apply_and_write validates before any device I/O, so a violating change
+    raises SystemExit and a valid one reaches the --dry-run return."""
+
+    def _cfg(self):
+        import settings  # noqa: E402
+        fields = {"StartingTherapyPressure": 8.0, "MinimumTherapyPressure": 6.0,
+                  "MaximumTherapyPressure": 15.0, "RampDurationMinutes": 10,
+                  "EZEX": 2.0, "StartingRampPressure": 4.0}
+        raw = {"ConfigurationData": "0" * 15, "Reserved": "0" * 5}
+        return settings, {"serial": "B0000000", "device_type": "APAP",
+                          "layout": settings.LAYOUT_APAP, "fields": fields, "raw": raw}
+
+    def _args(self, **kw):
+        import types
+        base = dict(allow_prescription=True, dry_run=True, yes=True, port="COM_TEST")
+        base.update(kw)
+        return types.SimpleNamespace(**base)
+
+    def test_rejects_ramp_pressure_within_1_of_min(self):
+        settings, cfg = self._cfg()
+        # min therapy = 6.0, so ramp must be <= 5.0; 5.5 violates the cap
+        with self.assertRaises(SystemExit) as cm:
+            settings.apply_and_write(cfg, {"StartingRampPressure": 5.5}, self._args())
+        self.assertIn("GentleRise", str(cm.exception))
+
+    def test_rejects_lowering_min_below_ramp_plus_1(self):
+        settings, cfg = self._cfg()
+        # ramp stays 4.0, but dropping min to 4.0 leaves only 0 headroom -> reject
+        with self.assertRaises(SystemExit) as cm:
+            settings.apply_and_write(cfg, {"MinimumTherapyPressure": 4.0}, self._args())
+        self.assertIn("GentleRise", str(cm.exception))
+
+    def test_allows_ramp_pressure_with_headroom(self):
+        settings, cfg = self._cfg()
+        # 5.0 is exactly 1.0 below min 6.0 -> allowed; dry-run returns without exit
+        self.assertIsNone(
+            settings.apply_and_write(cfg, {"StartingRampPressure": 5.0}, self._args()))
+
+
 if __name__ == "__main__":
     unittest.main()

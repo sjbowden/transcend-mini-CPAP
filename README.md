@@ -142,7 +142,9 @@ python3 settings.py --port COM3 --diff a.json       # diff current vs a saved sn
 
 Editing uses **read‑modify‑write**: it changes only the requested field, preserves the
 opaque blob verbatim, sends the write, checks the `R55` ack, then **reads back to verify**
-— and auto‑saves a timestamped backup before every write (`--restore FILE` rolls back).
+— and auto‑saves a timestamped backup before every write (`--restore FILE` rolls back). It
+also range‑checks each value and enforces the device's cross‑field rules (min ≤ start ≤ max,
+and GentleRise pressure ≥ 1 cmH₂O below the therapy pressure) before sending anything.
 
 ```bash
 python3 settings.py --port COM3 --set-ezex 2              # comfort: pressure relief 0–3
