@@ -194,7 +194,8 @@ class TestConvertEndToEnd(unittest.TestCase):
                 enc(t0 + timedelta(minutes=15), 14, 150)]  # MaximumPressureSetting 15.0
         recs += [enc(t0 + timedelta(minutes=5 * k), 22, 7) for k in range(1, 80)]
         recs += [enc(t0 + timedelta(minutes=30), 9, 12),
-                 enc(t0 + timedelta(minutes=45), 24, 130),  # PressureIncreasedFromHypopneas (reason flag)
+                 enc(t0 + timedelta(minutes=45), 24, 85),   # PressureIncreasedFromHypopneas -> 8.5
+                                                            # (consistent with MaxPressureUsed 9.5 below)
                  enc(t0 + timedelta(hours=7), 16, 78),
                  enc(t0 + timedelta(hours=7), 17, 95),
                  enc(t0 + timedelta(hours=7), 2, 0)]
