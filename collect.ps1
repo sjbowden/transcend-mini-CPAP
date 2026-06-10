@@ -1,4 +1,4 @@
-# Transcend miniCPAP raw event-log collector.
+# Transcend Micro raw event-log collector.
 # Drives the FTDI serial port, downloads the compliance event log, writes raw hex to -OutFile.
 param(
   [string]$Port = 'COM3',

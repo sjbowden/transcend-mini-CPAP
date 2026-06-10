@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transcend miniCPAP — view and (carefully) edit device settings over USB.
+"""Transcend Micro — view and (carefully) edit device settings over USB.
 
 Reads/writes the device configuration using the same reverse-engineered serial
 protocol as the data download (see PROTOCOL.md). The official app's password only

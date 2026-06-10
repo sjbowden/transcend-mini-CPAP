@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decode a Transcend miniCPAP raw event-log dump (from collect.ps1) into therapy data.
+"""Decode a Transcend Micro raw event-log dump (from collect.ps1) into therapy data.
 
 Usage: python3 parse.py dump.txt [older-dump.txt ...]
 Multiple dumps are merged (overlapping records deduplicated by queue address);

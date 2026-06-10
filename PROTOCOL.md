@@ -1,7 +1,9 @@
-# Transcend miniCPAP — USB serial protocol (reverse-engineered)
+# Transcend Micro — USB serial protocol (reverse-engineered)
 
-Device: Somnetics Transcend (FTDI FT231X bridge, `VID_0403 PID_6015`).
-Source: decompiled `Somnetics.TranscendGo.*` assemblies (TranSyncGo client).
+Device: Somnetics Transcend Micro 510 (FTDI FT231X bridge, `VID_0403 PID_6015`).
+Source: decompiled `Somnetics.TranscendGo.*` assemblies (TranSyncGo client) — the
+desktop "mini PAP" software, which serves the whole Transcend family (miniCPAP /
+Transcend 3 / Micro), hence the "mini" naming throughout.
 Validated live against a real device on 2026-06-07.
 
 See [README.md](README.md) for the full toolchain (download → parse → SleepHQ upload).
@@ -12,6 +14,8 @@ See [README.md](README.md) for the full toolchain (download → parse → SleepH
 > trace, respiratory rate, tidal volume, or minute ventilation. The Transcend is a
 > compliance/event recorder, not a full data-logger, so those channels are simply
 > unavailable (this is also why OSCAR never supported detailed Transcend graphs).
+> Vendor-stated retention: the device holds **3–6 months** of compliance data
+> depending on use (My SleepDash manual 104378 p.7) — download before it wraps.
 
 ## Transport
 - USB‑to‑serial bridge. Two are used across hardware revisions: the **FTDI FT231X**
@@ -71,8 +75,10 @@ The device configuration is read with `Tab`→`Rab` and written with `Tcc`→`R5
 the serial**: `A`=StandardCPAP, `B`=AutoPAP, `C`=CPAP+EZEX. The same transport as reads.
 
 > The official app's password only locks these in **its own UI** — the device firmware
-> accepts config writes with **no authentication**. `settings.py` therefore imposes the
-> boundary itself (comfort settings free; prescription pressures behind a flag).
+> accepts config writes with **no authentication**. The password is a single static
+> string printed in the public clinician guide (104214 p.7): `juniper`. `settings.py`
+> therefore imposes the boundary itself (comfort settings free; prescription pressures
+> behind a flag).
 
 **AutoPAP / EZEX config args** (positional, big-endian hex; read scales shown, write = inverse):
 
@@ -101,6 +107,9 @@ app (`EZEX`, `Ramp`) because they come from decompiling it; the **iOS** app uses
 labels for the same settings (both apps gate the prescription pressures):
 `EZEX` = **AirRelief** (0–3); `StartingRampPressure` = **GentleRise Pressure** (4–10 cmH₂O);
 `RampDurationMinutes` = **GentleRise Duration** (0 = disabled, to 45 min in 5‑min steps).
+The clinician guide (104214 p.8) adds a relative cap: GentleRise Pressure can be set
+**up to 1 cmH₂O below the Therapy Pressure**, and StartingTherapyPressure lies between
+min and max (the apps enforce both; firmware acceptance untested).
 
 **Not every device feature is on the serial link.** *Dry mode* (a post-therapy option that
 runs the blower to dry the tube and mask) has no *setting* visible here: toggling it on/off
@@ -143,7 +152,8 @@ Let the record be bytes `b0 b1 b2 b3 b4` (hex chars 0..9).
 5  RampStart               ×1.0   subdata = ramp start pressure ×10 (40 → 4.0 cmH2O); ÷10 for cmH2O
 6  RampEnd                 ×1.0   subdata = 1 (completion flag, not a pressure)
 7  LeakReport              ×1.0
-8  SupplyVoltage           ×1.0
+8  SupplyVoltage           ×1.0   units unverified; rails are 19 VDC (AC) / 14.8 VDC (battery),
+                                  so ×0.1 V/count (mains ≈ raw 190) is the leading hypothesis
 9  ApneaDetected           ×1.0
 10 HypopneaDetected        ×1.0
 11 PressureReduced         ×0.1
@@ -183,14 +193,25 @@ values) are **single whole-night summary numbers**, *not* time series — there 
 of each per session, at its end. Only `PressureAverage`/`AverageLeak` (and the pressure-change
 events) are sampled over time.
 
+**Ramp event pairing caveats** (vendor manuals 104214 p.4, 104143 pp.14, 17–18):
+pressing the ramp button when a ramp is configured-but-inactive **starts a ramp
+mid-session**, so a session can contain multiple `RampStart`/`RampEnd` pairs; and
+press-and-hold *accelerates* a running ramp to therapy pressure — still logged as a
+completion (there is no abort-to-zero, consistent with `RampEnd` subdata always = 1).
+Session boundaries can also appear without button presses: **SleepStart** auto-starts
+therapy on breathing into the mask, therapy **auto-restarts after a power failure**,
+and gross leak can trigger an auto-shutdown (104347 pp.13, 20).
+
 ## How the official app computes its numbers (for parity)
 Recovered from the decompiled compliance/charting view-models — match these to reproduce the
 app's figures exactly:
 
 - **Session** = one `StartTherapy`→`EndTherapy` pair (events time-sorted, `SupplyVoltage`
   skipped, orphans before a start dropped, kept only if end ≥ start). No min-length filter.
-- **Day assignment** = `hour ≥ cutoffHour ? date : date−1` (default cutoff is configurable;
-  at **noon** this equals this repo's `resmed_day()` noon split exactly).
+- **Day assignment** = `hour ≥ cutoffHour ? date : date−1` (cutoff is user-configurable;
+  the desktop app **ships defaulting to midnight** — 104207 pp.3–4 — so official-app daily
+  numbers differ from this repo's `resmed_day()` noon split unless the cutoff is changed;
+  at **noon** the two are identical).
 - **Averages are time-weighted by minutes**: `AvgPressure = ΣpressureMin⁻¹·Σ(pressure·min)`
   i.e. `TotalPressure/TotalPressureMinutes`; same for leak. (Not a plain mean of samples.)
 - **Percentiles are nearest-rank, no interpolation**: desktop uses `sorted[round(p·n)−1]`
@@ -200,7 +221,10 @@ app's figures exactly:
 - **% time in apnea** = `Σ(apneaDurationSec) / (hours·3600) · 100` — which confirms the
   **apnea/hypopnea subdata is a duration in seconds**.
 - **Pressures are stored ×10 internally** (event subdata already decoded with the ×0.1 scale).
+- **AHI denominator is therapy time** (patient hours, `Tb8`-style), not blower time
+  (104207 p.7: "events per therapy time in hours").
 - **Compliance buckets**: days ≥4 h, 4–6 h, 6–8 h, ≥8 h; `%≥4h = daysWith4h / daysInRange·100`.
+  The reportable 30-day rule is **4+ hours on 70% of nights** (104207 p.8).
 - **Device type** comes from the **serial's first char** (`A`/`B`/`C`), *not* the `Tff` code
   (`8011` is an unused opaque value).
 

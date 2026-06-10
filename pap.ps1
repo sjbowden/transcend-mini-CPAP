@@ -1,4 +1,4 @@
-# Transcend miniCPAP serial transport.
+# Transcend Micro serial transport.
 # Runs one or more PAP commands over the serial port and prints each response on its own
 # line, in order. Used by settings.py (and mirrors the transport in collect.ps1).
 #

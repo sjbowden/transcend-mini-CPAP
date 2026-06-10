@@ -1,8 +1,14 @@
 # transcend-mini-CPAP
 
-Pull therapy data off a **Somnetics Transcend miniCPAP** over USB and (optionally)
+Pull therapy data off a **Somnetics Transcend Micro** CPAP over USB and (optionally)
 get it into [SleepHQ](https://sleephq.com) — neither of which the device officially
 supports.
+
+> **Naming:** the device is a **Transcend Micro (510)**; Somnetics' desktop software
+> is called **"mini" / "mini PAP"** (its installer icon is literally "MiniCPAP"),
+> which is where this repo's name comes from. One desktop app — and, as far as the
+> decompile shows, one serial protocol — serves the whole Transcend family
+> (miniCPAP / Transcend 3 / Micro).
 
 The Transcend talks a proprietary ASCII protocol over an FTDI USB‑to‑serial bridge,
 and **no open‑source tool reads it** (OSCAR and SleepHQ support ResMed / Philips /
@@ -47,12 +53,13 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 | `sleephq/edf.py` | Minimal EDF/EDF+ reader + ResMed‑flavoured writer (per‑record CRC‑16/CCITT) |
 | `sleephq/templates/` | Bundled header‑only, PHI‑stripped ResMed EDF templates (STR/BRP/PLD) so the converter is self‑contained |
 | `tests/` | Unit tests (decoder round‑trip, multi‑dump merge, converter end‑to‑end) — `python3 -m unittest discover -s tests`; no device needed |
+| [`docs/NOTES.md`](docs/NOTES.md) | Distilled facts from the official Somnetics manuals (log capacity, setting constraints, stat definitions); the PDFs themselves are git‑ignored |
 
 Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 
 ## Requirements
 
-- A Transcend miniCPAP on a USB cable. Depending on hardware revision it enumerates as
+- A Transcend Micro (or family) CPAP on a USB cable. Depending on hardware revision it enumerates as
   either an **FTDI** serial port (`VID_0403 PID_6015`) or a **Silicon Labs CP210x**
   (`VID_10C4 PID_EA60`) — both work; just point `-Port` at whichever COM port appears.
 - **Windows** (the device's COM port), or **WSL** — `collect.ps1` is driven through
@@ -82,6 +89,8 @@ powershell -ExecutionPolicy Bypass -File collect.ps1 -Port COM3 -OutFile dump.tx
 ```
 The device is a request/response protocol at 38400 8N1; `collect.ps1` reads the
 event‑log header, walks the ring buffer, and writes the raw blocks to `dump.txt`.
+The download is non‑destructive, but the device only holds **3–6 months** of data
+(vendor‑stated) — pull at least every ~3 months or the oldest nights are lost.
 
 ### 2. Decode to CSV
 ```bash

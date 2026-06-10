@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert a Transcend miniCPAP event-log dump into a ResMed-format SD-card tree
+"""Convert a Transcend Micro event-log dump into a ResMed-format SD-card tree
 that SleepHQ's ResMed parser can ingest.
 
 Produces under --out:
