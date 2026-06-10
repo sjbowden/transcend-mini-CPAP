@@ -101,25 +101,37 @@ def session_metrics(s):
     # the rise; otherwise the session would read flat from its starting pressure. RampStart's
     # subdata is the ramp start pressure stored x10 (confirmed: subdata 40 = 4.0 cmH2O, matching
     # the configured StartingRampPressure), so divide by 10. RampEnd's subdata is a flag (=1).
-    rs = [(e["dt"], e["value"]) for e in evs if e["type"] == T_RAMP_START]
-    re_ = [e["dt"] for e in evs if e["type"] == T_RAMP_END]
+    # The ramp button can start a NEW ramp mid-session (manual re-ramp), so there may be
+    # several RampStart/RampEnd pairs per session — draw every one. Greedily match each start
+    # with the next end after it. (Press-and-hold accelerates a ramp, so a short later ramp is
+    # legitimate, not an error.) ramp_minutes (the configured DURATION setting) comes from the
+    # first, start-of-night ramp.
+    starts = sorted((e["dt"], e["value"]) for e in evs if e["type"] == T_RAMP_START)
+    ends = sorted(e["dt"] for e in evs if e["type"] == T_RAMP_END)
+    pairs, ei = [], 0
+    for t_rs, rsv in starts:
+        while ei < len(ends) and ends[ei] <= t_rs:
+            ei += 1
+        if ei < len(ends):
+            pairs.append((t_rs, rsv, ends[ei]))
+            ei += 1
     ramp_pts = []
     ramp_minutes = 0                       # the ramp DURATION setting, derived from the events
-    if rs and re_:
-        t_rs, rsv = rs[0]
-        t_re = re_[0]
+    for i, (t_rs, rsv, t_re) in enumerate(pairs):
         total = (t_re - t_rs).total_seconds()
-        if total > 0:
+        if total <= 0:
+            continue
+        if ramp_minutes == 0:
             # Snap to the device's 5-min increments — event timestamps are minute-granular,
             # so a 5-min ramp can measure as 4-6 min between RampStart/RampEnd.
             ramp_minutes = round(total / 60 / 5) * 5
-            ramp_start_p = rsv / 10.0   # subdata stored x10 (confirmed against the ramp-night dump)
-            therapy_p = s["start_pressure"]
-            if therapy_p > ramp_start_p:
-                n = max(2, int(total // 30))   # ~one point every 30s across the ramp
-                ramp_pts = [(t_rs + timedelta(seconds=total * k / n),
-                             ramp_start_p + (therapy_p - ramp_start_p) * k / n) for k in range(n + 1)]
-    # Pressure curve base: the ramp rise if present, else just the flat starting pressure.
+        ramp_start_p = rsv / 10.0   # subdata stored x10 (confirmed against the ramp-night dump)
+        therapy_p = s["start_pressure"]   # ramp ceiling; later pressure events correct any drift
+        if therapy_p > ramp_start_p:
+            n = max(2, int(total // 30))   # ~one point every 30s across the ramp
+            ramp_pts += [(t_rs + timedelta(seconds=total * k / n),
+                          ramp_start_p + (therapy_p - ramp_start_p) * k / n) for k in range(n + 1)]
+    # Pressure curve base: the ramp rise(s) if present, else just the flat starting pressure.
     base_pts = ramp_pts if ramp_pts else [(s["start"], s["start_pressure"])]
 
     return {

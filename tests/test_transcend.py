@@ -272,6 +272,32 @@ class TestConvertEndToEnd(unittest.TestCase):
             self.assertAlmostEqual(press[0], 4.0, delta=0.3)  # starts at the ramp start pressure
             self.assertGreater(max(press), 7.5)               # ramps up toward therapy pressure
 
+    def test_multiple_ramp_pairs_per_session(self):
+        # The ramp button can restart a ramp mid-session, so a single session may hold
+        # several RampStart/RampEnd pairs. session_metrics must draw EVERY rise (the curve
+        # dips back to the ramp start pressure at each one), while ramp_minutes stays the
+        # first ramp's configured duration.
+        import convert  # noqa: E402
+        t0 = datetime(2026, 6, 1, 22, 0)
+        ev = lambda mins, typ, val: {"dt": t0 + timedelta(minutes=mins), "type": typ, "value": val}
+        s = {
+            "start": t0, "end": t0 + timedelta(minutes=120), "start_pressure": 8.0,
+            "evs": [
+                ev(0, 5, 40),    # RampStart @ 4.0
+                ev(5, 6, 1),     # RampEnd  -> 5-min ramp
+                ev(60, 5, 40),   # RampStart again, mid-session
+                ev(65, 6, 1),    # RampEnd
+            ],
+        }
+        m = convert.session_metrics(s)
+        self.assertEqual(m["ramp_minutes"], 5)            # from the first ramp
+        # pressure curve must touch ~4.0 near BOTH ramp starts (t0 and t0+60min)
+        near_start = [(t, p) for (t, p) in m["pressure_pts"] if abs(p - 4.0) < 0.3]
+        self.assertTrue(any(t <= t0 + timedelta(minutes=2) for t, _ in near_start),
+                        "first ramp rise missing")
+        self.assertTrue(any(t0 + timedelta(minutes=58) <= t <= t0 + timedelta(minutes=62)
+                            for t, _ in near_start), "second (mid-session) ramp rise missing")
+
     def test_pressure_reason_flags_opt_in(self):
         # default: no pressure-reason annotations; --pressure-reason-flags adds them to EVE.
         def eve_bytes(out):
