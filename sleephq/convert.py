@@ -110,7 +110,11 @@ def session_metrics(s):
     ends = sorted(e["dt"] for e in evs if e["type"] == T_RAMP_END)
     pairs, ei = [], 0
     for t_rs, rsv in starts:
-        while ei < len(ends) and ends[ei] <= t_rs:
+        # NB: '<' not '<=' — a hard-accelerated ramp can start and end within the same
+        # minute (timestamps are minute-granular); its end must be consumed as a
+        # degenerate pair (total=0, drawn as nothing), not skipped, or this start
+        # would wrongly borrow the NEXT ramp's end.
+        while ei < len(ends) and ends[ei] < t_rs:
             ei += 1
         if ei < len(ends):
             pairs.append((t_rs, rsv, ends[ei]))

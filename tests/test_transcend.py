@@ -298,6 +298,30 @@ class TestConvertEndToEnd(unittest.TestCase):
         self.assertTrue(any(t0 + timedelta(minutes=58) <= t <= t0 + timedelta(minutes=62)
                             for t, _ in near_start), "second (mid-session) ramp rise missing")
 
+    def test_same_minute_ramp_does_not_steal_next_end(self):
+        # A hard-accelerated ramp can start and end within the same minute (timestamps
+        # are minute-granular). That degenerate pair must consume its own RampEnd —
+        # NOT skip it and borrow the next ramp's end, which would draw one bogus
+        # hour-long ramp and inflate ramp_minutes.
+        import convert  # noqa: E402
+        t0 = datetime(2026, 6, 1, 22, 0)
+        ev = lambda mins, typ, val: {"dt": t0 + timedelta(minutes=mins), "type": typ, "value": val}
+        s = {
+            "start": t0, "end": t0 + timedelta(minutes=120), "start_pressure": 8.0,
+            "evs": [
+                ev(0, 5, 40),    # RampStart @ 4.0 ...
+                ev(0, 6, 1),     # ... RampEnd in the SAME minute (degenerate, drawn as nothing)
+                ev(60, 5, 40),   # RampStart, mid-session
+                ev(65, 6, 1),    # RampEnd -> normal 5-min ramp
+            ],
+        }
+        m = convert.session_metrics(s)
+        self.assertEqual(m["ramp_minutes"], 5)            # from the real ramp, not 65
+        # nothing below ~5 cmH2O may appear between the degenerate ramp and minute 58
+        low_mid = [t for t, p in m["pressure_pts"]
+                   if p < 5.0 and t0 + timedelta(minutes=2) < t < t0 + timedelta(minutes=58)]
+        self.assertEqual(low_mid, [], "degenerate ramp stole the next ramp's end")
+
     def test_pressure_reason_flags_opt_in(self):
         # default: no pressure-reason annotations; --pressure-reason-flags adds them to EVE.
         def eve_bytes(out):
