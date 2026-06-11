@@ -24,14 +24,14 @@ Calibration is never writable.
 import argparse
 import json
 import os
-import shutil
-import subprocess
 import sys
 from datetime import datetime
 
-PAP_PS1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pap.ps1")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import parse as tparse  # noqa: E402  (reuse parse_header for the Tbd header)
+from transport import make_transport, TransportError  # noqa: E402
+
+TRANSPORT = "auto"   # backend preference, set from --transport in main()
 
 # Config field layouts, mirroring the decompiled (Get|Write)Configuration* commands.
 # kind: "scaled" = hex int /10 on read, *10 on write (pressures, EZEX level);
@@ -76,35 +76,30 @@ APP_NAMES = {
 # Transport
 # ---------------------------------------------------------------------------
 def pap(commands, port, required=True):
-    """Run PAP commands via pap.ps1; return one response string per command.
+    """Run PAP commands; return one response string per command.
 
-    One process (one port open/close) per command — the device handles a single
+    One transport (one port open/close) per command — the device handles a single
     command per connection most reliably, mirroring the official app's ProcessCommand.
+    Backend (pyserial vs powershell bridge) is chosen by transport.make_transport
+    from the module-level TRANSPORT preference (--transport flag).
     With required=False a missing/timed-out response yields "" instead of exiting.
     """
-    win = PAP_PS1
-    if shutil.which("wslpath"):
-        win = subprocess.check_output(["wslpath", "-w", PAP_PS1], text=True).strip()
     responses = []
     for c in commands:
         try:
-            proc = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", win,
-                 "-Port", port, "-Command", c],
-                capture_output=True, text=True, timeout=60,
-            )
-        except subprocess.TimeoutExpired:
+            with make_transport(port, TRANSPORT) as t:
+                resp = t.command(c)
+        except TransportError as e:
             if required:
-                sys.exit(f"Transport error: timed out waiting for response to {c!r} on {port}.")
+                sys.exit(f"Transport error: {c!r}: {e}")
             responses.append("")
             continue
-        out = [ln.rstrip("\r") for ln in proc.stdout.splitlines() if ln.strip()]
-        if not out:
+        if not resp:
             if required:
-                sys.exit(f"Transport error: no response to {c!r}\n{proc.stderr.strip()}")
+                sys.exit(f"Transport error: no response to {c!r} on {port}.")
             responses.append("")
             continue
-        responses.append(out[0])
+        responses.append(resp)
     return responses
 
 
@@ -365,6 +360,8 @@ def diff_blob(path, args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", default="COM3")
+    ap.add_argument("--transport", choices=["auto", "pyserial", "powershell"], default="auto",
+                    help="serial backend (auto: COMx under WSL -> powershell bridge, else pyserial)")
     ap.add_argument("--show", action="store_true", help="print current settings (read-only)")
     ap.add_argument("--set-ezex", type=int, metavar="0-3")
     ap.add_argument("--set-ramp-time", type=int, metavar="MIN")
@@ -380,6 +377,8 @@ def main():
     ap.add_argument("--diff", metavar="FILE", help="diff current config against a saved snapshot")
     ap.add_argument("--restore", metavar="FILE", help="re-write a saved snapshot to the device")
     args = ap.parse_args()
+    global TRANSPORT
+    TRANSPORT = args.transport
 
     if args.restore:
         return restore(args.restore, args)
