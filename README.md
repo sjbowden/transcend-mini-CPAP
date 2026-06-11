@@ -45,9 +45,12 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 |---|---|
 | [`PROTOCOL.md`](PROTOCOL.md) | The reverse‑engineered serial wire protocol (commands, framing, the 5‑byte event format, all 28 event types) |
 | `pipeline.sh` | End‑to‑end orchestrator: pull → convert → upload (with stage‑skip flags) |
-| `collect.ps1` | Drives the serial port and downloads the raw event log → `dump.txt` |
+| `app.py` | **Windows GUI** — Pull / Convert / Upload buttons + read‑only settings view (see [`packaging/WINDOWS.md`](packaging/WINDOWS.md)) |
+| `transport.py` | Serial backends: **pyserial** (native Windows / usbipd) or the **powershell.exe bridge** (WSL default), auto‑selected |
+| `collect.py` | Pure‑Python event‑log collector (same `dump.txt` format as `collect.ps1`) |
+| `collect.ps1` | PowerShell collector — current default in `pipeline.sh` until the pyserial path is live‑validated |
 | `parse.py` | Decodes the event log → `events.csv`, `sessions.csv`, and a printed summary |
-| `pap.ps1` | Reusable serial transport (send a command, return the response) used by `settings.py` |
+| `pap.ps1` | PowerShell serial transport, used by `transport.py`'s bridge backend |
 | `settings.py` | View and (carefully) edit device settings — EZEX, ramp, pressures |
 | `sleephq/convert.py` | Converts the parsed sessions into a ResMed‑format SD‑card tree SleepHQ can ingest |
 | `sleephq/edf.py` | Minimal EDF/EDF+ reader + ResMed‑flavoured writer (per‑record CRC‑16/CCITT) |
@@ -65,8 +68,23 @@ Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 - **Windows** (the device's COM port), or **WSL** — `collect.ps1` is driven through
   `powershell.exe`'s `System.IO.Ports`, so no `usbipd` is needed under WSL.
 - Python 3.8+ for `parse.py` / `convert.py` (standard library only).
+  `pyserial` is needed only for the direct-serial transport on native Windows
+  (or a usbipd-attached port under WSL); the WSL powershell-bridge path needs
+  nothing extra.
 
 ## Usage
+
+### Windows app
+```powershell
+pip install pyserial
+python app.py        # GUI: Pull / Convert / Upload buttons + settings view
+```
+Pure Python end‑to‑end on native Windows (no PowerShell helpers, no WSL).
+[`packaging/WINDOWS.md`](packaging/WINDOWS.md) covers building a standalone
+`TranscendSync.exe` with PyInstaller. The CLI equivalents:
+```bash
+python collect.py --port COM3 --out dump.txt    # pure-Python pull (pyserial)
+```
 
 ### All in one: `pipeline.sh`
 The whole flow — pull from the device → convert → upload to SleepHQ — is wired together:

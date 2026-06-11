@@ -1,5 +1,18 @@
 # TODO
 
+## Windows app
+
+- ⚠️ **Live-validate the pyserial transport** (`transport.py` / `collect.py`). It mirrors
+  pap.ps1/collect.ps1 timing exactly and is unit-tested against a fake serial port, but has
+  not yet touched the real device. On Windows:
+  `python collect.py --port COM3 --out dump-pyserial.txt`, then diff the BLOCK records
+  against a back-to-back `collect.ps1` dump (allow a few new tail events between pulls).
+  Also exercise `settings.py --show --transport pyserial`. **Once validated:** switch
+  `pipeline.sh` to `collect.py` and demote the .ps1 scripts to fallbacks.
+- ⬜ **Build + smoke-test the .exe** per packaging/WINDOWS.md (needs Windows Python:
+  pyinstaller is not a cross-compiler). Check the bundled templates resolve (one Convert
+  run) and note the SmartScreen first-run warning.
+
 ## From the vendor manuals (see docs/NOTES.md for cites)
 
 - ✅ **DONE — SupplyVoltage (event 8) scale = ×0.1 V.** Confirmed against the dump: raw

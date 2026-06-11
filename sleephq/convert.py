@@ -50,7 +50,9 @@ import edf as edflib    # noqa: E402
 
 DEFAULT_SERIAL = "TRANSCEND0"   # placeholder; real serial comes from the dump header or --serial
 # Bundled, PHI-stripped ResMed EDF header templates (signal definitions only) -> self-contained.
-_TPL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+# Under a PyInstaller-frozen app the templates are unpacked to sys._MEIPASS/templates.
+_TPL = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+                    "templates")
 TEMPLATE = os.path.join(_TPL, "STR.edf")
 BRP_TEMPLATE = os.path.join(_TPL, "BRP.edf")
 PLD_TEMPLATE = os.path.join(_TPL, "PLD.edf")
@@ -441,7 +443,7 @@ def write_identification(path, serial):
         json.dump(obj, f)
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("dump", nargs="+",
                     help="Transcend dump.txt from collect.ps1; several merge safely "
@@ -464,7 +466,7 @@ def main():
                     help="keep the device's raw uncompensated leak (baseline tracks pressure); "
                          "default vent-compensates the leak graph to ResMed-style unintentional "
                          "leak (approximate; reshapes the detail graph only, not the STR summary)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     for label, tpl in [("STR.edf", TEMPLATE), ("BRP.edf", BRP_TEMPLATE), ("PLD.edf", PLD_TEMPLATE)]:
         if not tpl or not os.path.exists(tpl):
