@@ -1,5 +1,6 @@
 # Personal health data / regenerable outputs (contain therapy data + device serial)
 dump.txt
+dump*.txt
 events.csv
 sessions.csv
 *.dump
