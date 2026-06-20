@@ -132,4 +132,8 @@ more of what the Transcend actually records. Legend:
   behaviorally accounted (36/60 bits carry no known meaning, but 35 are inert constants + 1 is
   this latch — no hidden settings remain). A post-write read-back diff confined to the blob is
   **expected and benign**; settings.py verify treats blob-only changes as a note, not a failure.
-  (PROTOCOL.md bit-accounting + README.md updated.)
+  (PROTOCOL.md bit-accounting + README.md updated.) Remaining (unprovable without the rig):
+  the 32 constant bits are **likely factory calibration** (offset+gain) — the app has a
+  calibration feature, `Tb3` reads the offset (currently `+0.0`), and the `0000` block is
+  all-zero, *consistent* with storing a zero offset; `0100` is a gain candidate. Confirming
+  needs a non-zero calibration offset (calibration equipment) to watch the bytes move.

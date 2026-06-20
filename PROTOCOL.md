@@ -129,15 +129,24 @@ not be touched** (it recalibrates the pressure sensor).
 |-----:|------|---------|--------|
 | 8  | chars 12–13 `SS` | `StartingTherapyPressure ×10` | **decoded** |
 | 16 | chars 4–7 `aa55` | magic signature | identified (not data) |
-| 32 | chars 0–3 `0000` + chars 8–11 `0100` | constant | unknown, but inert |
+| 32 | chars 0–3 `0000` + chars 8–11 `0100` | constant | likely **factory calibration** (offset+gain) |
 | 3  | high 3 bits of nibble `F` | constant `0` | unknown, but inert |
 | 1  | low bit of nibble `F` | sticky `0→1` "modified" latch | behavior fully characterized; exact meaning unproven |
 
 So **36 of 60 bits carry no known semantic value** (32 + 3 inert constants + 1 latch); 8 are
 decoded and 16 are the magic. But **nothing is behaviorally open**: 35 of those 36 never move
-under any setting (start/min/max/ramp/EZEX) — reserved/version/constant — and the 1 remaining
-bit is a one-way "config modified" latch that no ordinary write (app or serial) clears. There
-are no hidden settings left to find in the blob.
+under any *user* setting (start/min/max/ramp/EZEX) and the 1 remaining bit is a one-way "config
+modified" latch that no ordinary write clears. There are no hidden user settings left in the blob.
+
+**Leading hypothesis for the 32 constant bits: factory calibration constants** (the app has a
+calibration feature; `Tb4` writes it). They'd be constant for us precisely because we never
+recalibrate. Read-only correlation (2026-06-20): the calibration *offset* `Tb3` = `+0.0` cmH₂O,
+and the `0000` block (chars 0–3) is all-zero — **consistent** with the offset being stored there
+(a zero offset → `0000`), though not provable while the offset is 0. The non-zero `0100` (chars
+8–11) is a candidate for the **gain/slope** (`Tb3` returns only an offset, no gain). Confirming
+needs a *non-zero* offset to watch `0000` change — i.e. the calibration rig — so it stays an
+unproven hypothesis. This is also why blindly writing the blob is dangerous: corrupting these
+bytes would **mis-calibrate the pressure sensor**, which is exactly why RMW preserves it verbatim.
 
 **App names** for the user-changeable fields. The field names above follow the **Windows**
 app (`EZEX`, `Ramp`) because they come from decompiling it; the **iOS** app uses friendlier
