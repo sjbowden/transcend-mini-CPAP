@@ -114,6 +114,16 @@ more of what the Transcend actually records. Legend:
   documented in PROTOCOL.md, and locked in by `test_ramp_curve_starts_at_ramp_start_pressure`.
 - **Blob comfort-flag mapping — not achievable, closed.** The iOS app exposes only named
   fields (AirRelief=EZEX, GentleRise Pressure/Duration, locked prescription pressures) and
-  no auto-start/stop/alert toggle, so *no user setting writes the `ConfigurationData` blob*.
-  It's a factory/firmware-fixed block (`aa55` magic) — can't be diff-mapped. `--snapshot`/
-  `--diff` stay useful only to confirm writes preserve it verbatim.
+  no auto-start/stop/alert toggle, so *no user comfort setting writes the `ConfigurationData`
+  blob*. It's not a free-floating flag field to diff-map. **Decoded (2026-06-20) by single-
+  field sweeps:** the blob is `0000aa550100` + `SS` + `F`, NOT factory-static. The
+  `0000aa550100` prefix is constant; **`SS` (chars 12-13) = `StartingTherapyPressure ×10`**
+  (confirmed 5/5: 11→`6e`, 12→`78`, 13→`82`, 14→`8c`, 15→`96`); **min and max do NOT appear
+  in the blob** (swept ±, unchanged). The final nibble `F` is an undetermined flag — was `0`
+  only in the pristine never-written config and `1` through every write since, independent of
+  start/min/max/ramp/EZEX (the earlier "tracks ramp" guess was **disproven**: ramp 0/5/10 all
+  read `1`). Leading hypothesis: a latching "modified outside the official app" bit. A
+  post-write read-back diff confined to the blob is therefore **expected and benign**; the
+  named settings still verify exactly. (PROTOCOL.md + README.md updated; settings.py verify
+  now treats blob-only changes as a note, not a failure.) Only open question, low value:
+  confirm the `F` bit by writing via the TranscendGo app and checking if it resets to `0`.

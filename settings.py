@@ -300,13 +300,21 @@ def apply_and_write(cfg, changes, args):
     after = read_config(args.port)
     ok = all(abs(after["fields"][n] - new[n]) < 1e-6 if isinstance(new[n], float)
              else after["fields"][n] == new[n] for n in changes)
-    unchanged = all(after["raw"][n] == cfg["raw"][n] for n, _, k in cfg["layout"] if k == "opaque")
-    if ok and unchanged:
-        print("Verified: settings updated and opaque data preserved.")
-    else:
-        print(f"WARNING: read-back did not match. Inspect with --show; restore with "
-              f"--restore {backup} if needed.")
+    # The firmware regenerates part of ConfigurationData (a derived shadow of the
+    # prescription — chars 12-13 = StartingTherapyPressure x10; see PROTOCOL.md), so an
+    # opaque-field change on read-back is benign, NOT a failed write. The named fields we
+    # set are the real success criterion.
+    blob_changed = [n for n, _, k in cfg["layout"]
+                    if k == "opaque" and after["raw"][n].lower() != cfg["raw"][n].lower()]
+    if not ok:
+        print(f"WARNING: read-back did not match the requested settings. Inspect with "
+              f"--show; restore with --restore {backup} if needed.")
         print_config(after)
+    else:
+        print("Verified: all settings updated as requested.")
+        for n in blob_changed:
+            print(f"Note: firmware regenerated opaque field {n} "
+                  f"({cfg['raw'][n]} -> {after['raw'][n]}) — derived from the prescription, benign.")
 
 
 def restore(path, args):
@@ -330,13 +338,18 @@ def restore(path, args):
     after = read_config(args.port)
     ok = all(abs(after["fields"][n] - saved["fields"][n]) < 1e-6
              for n, _, k in cur["layout"] if k != "opaque")
-    opaque_ok = all(after["raw"][n].lower() == saved["raw"][n].lower()
-                    for n, _, k in cur["layout"] if k == "opaque")
-    if ok and opaque_ok:
-        print("Verified: device matches the snapshot.")
-    else:
-        print("WARNING: read-back does not match the snapshot. Inspect with --show.")
+    # Opaque blob is firmware-regenerated (see apply_and_write) — report a difference, but
+    # don't treat it as a failed restore; the named settings are what matter.
+    blob_changed = [n for n, _, k in cur["layout"]
+                    if k == "opaque" and after["raw"][n].lower() != saved["raw"][n].lower()]
+    if not ok:
+        print("WARNING: read-back does not match the snapshot's settings. Inspect with --show.")
         print_config(after)
+    else:
+        print("Verified: device settings match the snapshot.")
+        for n in blob_changed:
+            print(f"Note: firmware regenerated opaque field {n} "
+                  f"({saved['raw'][n]} -> {after['raw'][n]}) — derived from the prescription, benign.")
 
 
 def diff_blob(path, args):

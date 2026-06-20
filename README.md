@@ -180,14 +180,21 @@ python3 settings.py --port COM3 --set-min 11 --set-max 14 --allow-prescription
 
 ### The opaque `ConfigurationData` blob
 
-The config response carries a 15‑char opaque blob (`0000aa5501006e1`) with an `aa55` magic
+The config response carries a 15‑char opaque blob (`0000aa550100XXY`) with an `aa55` magic
 marker. We tried to map its bits by differential diffing, but the iOS app turns out to
 expose **only named fields** — *AirRelief* (=`EZEX`), *GentleRise Pressure*
 (=`StartingRampPressure`), *GentleRise Duration* (=`RampDurationMinutes`), and the
-(locked) prescription pressures. There is **no** auto‑start/stop or alert toggle, so
-nothing the user can change writes the blob: it's a **factory/firmware‑fixed** block, not
-user‑mappable. `--snapshot`/`--diff` remain useful to *confirm* that every write preserves
-it verbatim (they do).
+(locked) prescription pressures — so there's no hidden auto‑start/stop or alert toggle to
+discover. The blob is **not** purely factory‑fixed, though: single‑field sweeps decoded it as
+`0000aa550100` + `SS` + `F`. The `0000aa550100` prefix is constant; **`SS` (chars 12–13) is
+`StartingTherapyPressure ×10`** in hex (confirmed 11→`6e` … 15→`96`), which the firmware
+rewrites after a write — so raising the start 11.0→12.0 turns `…6e0` into `…781`. **Min and
+max do not appear in the blob.** The final nibble `F` is an undetermined flag (it was `0`
+only in the pristine, never‑written config and `1` ever since — likely a "modified outside the
+app" bit). The tool always sends the blob unchanged (read‑modify‑write); the device
+regenerating `SS`/`F` on its own is benign, so `settings.py` verifies the *named* fields and
+reports any blob change as an informational note rather than a failure. `--snapshot`/`--diff`
+show exactly which bytes the firmware moved.
 
 ## How it was reverse‑engineered
 

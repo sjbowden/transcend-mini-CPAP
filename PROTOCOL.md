@@ -96,11 +96,43 @@ the serial**: `A`=StandardCPAP, `B`=AutoPAP, `C`=CPAP+EZEX. The same transport a
 (StandardCPAP layout: StartingTherapyPressure(4), ConfigurationData(28), RampDuration(4),
 Reserved(4), StartingRampPressure(4) — no min/max.) Hex is uppercase, left-padded to the
 field width (`CommandArgumentFormatter`: `int(value·scale).ToString("X")`). The two opaque
-fields (`ConfigurationData`, `Reserved`) **must be written back verbatim**. They appear to
-be a **factory/firmware‑fixed** block (`ConfigurationData` carries an `aa55` magic marker):
-the iOS app exposes only the named fields below, so no user setting changes them, and they
-can't be bit‑mapped by diffing. Calibration `Tb4` is writable but **must not be touched**
-(it recalibrates the pressure sensor).
+fields (`ConfigurationData`, `Reserved`) **must be written back verbatim** — the tool sends
+them unchanged — but `ConfigurationData` is **not static**: the firmware regenerates part of
+it after a write. Decoded live by single-field sweeps (2026-06-20), `ConfigurationData` is
+15 hex chars **`0000aa550100` `SS` `F`**:
+
+- chars 0–11 `0000aa550100` — **constant** prefix (the `aa55` is a magic marker). Verified
+  invariant while sweeping min (10/8/6), max (16/18/20), ramp (0/5/10) and EZEX.
+- chars 12–13 `SS` — **`StartingTherapyPressure ×10`** in hex. Confirmed across a 5-point
+  start sweep: 11.0→`6e` (0x6E=110), 12.0→`78`, 13.0→`82`, 14.0→`8c`, 15.0→`96`. **Min and
+  max do NOT appear** anywhere in the blob (swept ±, blob unchanged).
+- char 14 `F` — a 1-nibble **flag, undetermined**. It was `0` only in the original untouched
+  config and has been `1` through every serial write since, independent of start/min/max/ramp/
+  EZEX (an early "ramp on/off" guess was **disproven** — ramp 0/5/10 all read `1`). Leading
+  hypothesis: a latching "modified outside the official app" / dirty bit (pristine `0` → `1`
+  on the first non-app write). Untested — confirming would need a write via the TranscendGo
+  app to see if it resets to `0`.
+
+So the blob is a firmware-derived shadow of `StartingTherapyPressure` plus a flag bit, **not**
+a user-mappable comfort-flag field. The tool always sends it verbatim; the firmware rewriting
+`SS`/`F` means a post-write read-back difference *confined to `ConfigurationData`* is expected
+and benign (the named settings still verify exactly). Calibration `Tb4` is writable but **must
+not be touched** (it recalibrates the pressure sensor).
+
+**Bit accounting (60 bits total = 15 hex chars):**
+
+| Bits | Span | Content | Status |
+|-----:|------|---------|--------|
+| 8  | chars 12–13 `SS` | `StartingTherapyPressure ×10` | **decoded** |
+| 16 | chars 4–7 `aa55` | magic signature | identified (not data) |
+| 32 | chars 0–3 `0000` + chars 8–11 `0100` | constant | unknown, but inert |
+| 3  | high 3 bits of nibble `F` | constant `0` | unknown, but inert |
+| 1  | low bit of nibble `F` | the `0→1` latch flag | behavior seen, meaning hypothesized |
+
+So **36 of 60 bits are semantically unexplained** (32 + 3 inert constants + 1 flag); 8 are
+decoded and 16 are the magic. Of the 36, **35 never moved** under any setting we vary
+(start/min/max/ramp/EZEX) — almost certainly reserved/version/constant, not hidden settings —
+leaving effectively **one mystery bit** of behavioral interest (the `F` latch).
 
 **App names** for the user-changeable fields. The field names above follow the **Windows**
 app (`EZEX`, `Ramp`) because they come from decompiling it; the **iOS** app uses friendlier
