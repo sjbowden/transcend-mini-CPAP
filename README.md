@@ -158,6 +158,11 @@ python3 settings.py --port COM3 --snapshot a.json   # save config (for blob mapp
 python3 settings.py --port COM3 --diff a.json       # diff current vs a saved snapshot
 ```
 
+> **The official Windows desktop app under‑reports the APAP *minimum* pressure** (it shows a
+> stuck `10` regardless of the real value — an initialization‑order bug, root‑caused in
+> [`PROTOCOL.md`](PROTOCOL.md)). This `--show` read, and the BLE/MySleepDash mobile app, are
+> correct; if the desktop app's minimum disagrees, trust the device read, not the desktop app.
+
 Editing uses **read‑modify‑write**: it changes only the requested field, preserves the
 opaque blob verbatim, sends the write, checks the `R55` ack, then **reads back to verify**
 — and auto‑saves a timestamped backup before every write (`--restore FILE` rolls back). It

@@ -169,6 +169,31 @@ counter `Tbc` (+2m19s in one test) while the **patient-time** counter `Tb8` stay
 is the general rule for the two counters — `Tbc` = all blower runtime (ramp + mask-off + dry
 cycles), `Tb8` = actual breathing only — which is why blower time exceeds patient time.
 
+### Bug in the official desktop app: it under-reports the APAP minimum
+
+The **Windows desktop app (`Somnetics.TranscendGo.Client` v1.1.2.0) displays a wrong, too-low
+minimum pressure** — it showed `10` for a device whose real minimum was 11, then 12, then 13.
+Start and max display correctly; only the minimum is wrong, it never tracks the real value, and
+it's independent of the clinician lock. **Root-caused in the decompiled `…Business` settings
+view-model — an initialization-order bug**, not a parse failure:
+
+- The default backing field is `private double _startingTherapyPressure = 10.0;`.
+- On config load (the `Get…ConfigurationCommand` handler), fields are assigned in this order:
+  `MinimumTherapyPressure = command.MinimumTherapyPressure;` **then** (a line later)
+  `StartingTherapyPressure = command.StartingTherapyPressure;`.
+- The `MinimumTherapyPressure` setter clamps the min so it can't exceed the start:
+  `if (value > _startingTherapyPressure) value = _startingTherapyPressure;`.
+- But at the moment the min is assigned, `_startingTherapyPressure` **still holds the default
+  `10.0`** (start hasn't loaded yet). So any real min > 10 is clamped down to 10, and the min is
+  never recomputed after the real start loads.
+
+This reproduces every symptom: real min 11/12/13 all show as `10`; start/max are fine; it ignores
+the lock; and it re-clamps on every reopen (so editing the min + Update + reopen reverts to 10).
+Confirmed live: setting the device to min 13 / start 14 over serial made the desktop app show
+`min 10 / start 14`, exactly as the code predicts, while the **BLE/MySleepDash app and this
+toolkit's serial read both showed the correct 13**. Takeaway: for the Micro 510, **don't trust
+the desktop app's minimum** — the device, the serial read, and the mobile app are authoritative.
+
 ## Download algorithm (from `TranSyncManager.GetEventStrings`)
 1. `Ta8` → `address`.
 2. `Ta9` with (StartAddress=address, NumBytes=50)  — primes/reads the 50-byte header region.
