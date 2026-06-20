@@ -162,7 +162,8 @@ Editing uses **read‑modify‑write**: it changes only the requested field, pre
 opaque blob verbatim, sends the write, checks the `R55` ack, then **reads back to verify**
 — and auto‑saves a timestamped backup before every write (`--restore FILE` rolls back). It
 also range‑checks each value and enforces the device's cross‑field rules (min ≤ start ≤ max,
-and GentleRise pressure ≥ 1 cmH₂O below the therapy pressure) before sending anything.
+and GentleRise pressure ≥ 1 cmH₂O below the *starting* therapy pressure — matching the official
+app, which bounds the ramp by where therapy starts, not the APAP min) before sending anything.
 
 ```bash
 python3 settings.py --port COM3 --set-ezex 2              # comfort: pressure relief 0–3
@@ -189,9 +190,11 @@ discover. The blob is **not** purely factory‑fixed, though: single‑field swe
 `0000aa550100` + `SS` + `F`. The `0000aa550100` prefix is constant; **`SS` (chars 12–13) is
 `StartingTherapyPressure ×10`** in hex (confirmed 11→`6e` … 15→`96`), which the firmware
 rewrites after a write — so raising the start 11.0→12.0 turns `…6e0` into `…781`. **Min and
-max do not appear in the blob.** The final nibble `F` is an undetermined flag (it was `0`
-only in the pristine, never‑written config and `1` ever since — likely a "modified outside the
-app" bit). The tool always sends the blob unchanged (read‑modify‑write); the device
+max do not appear in the blob.** The final nibble `F` is a sticky "config modified" latch: `0`
+only in the original clinic‑provisioned config, `1` after the first local write, and it stays
+`1` through every write since — including an official‑app write that regenerated the blob,
+which rules out the "the app resets it" idea (only a factory reset likely clears it). The tool
+always sends the blob unchanged (read‑modify‑write); the device
 regenerating `SS`/`F` on its own is benign, so `settings.py` verifies the *named* fields and
 reports any blob change as an informational note rather than a failure. `--snapshot`/`--diff`
 show exactly which bytes the firmware moved.

@@ -257,17 +257,18 @@ def apply_and_write(cfg, changes, args):
             sys.exit("Refusing: starting pressure must be between min and max.")
 
     # Relative cap (104214 p.8 / docs/NOTES.md): GentleRise (StartingRampPressure) must sit at
-    # least 1 cmH2O below the therapy pressure it ramps up to — the APAP floor (min) on an APAP,
-    # the single set pressure on a CPAP. The apps enforce this on top of the 4-10 absolute range;
-    # the firmware's own behavior is untested, so we validate conservatively. Evaluated on `new`,
-    # so lowering the therapy pressure can trip it too (not just raising the ramp pressure).
+    # least 1 cmH2O below the StartingTherapyPressure it ramps up to. The ramp rises from the
+    # GentleRise pressure to the *starting* therapy pressure (where therapy begins), NOT the APAP
+    # floor — confirmed live (2026-06-20): the official app set GentleRise 9.5 with min 10.0
+    # (only 0.5 below min) but start 12.0/13.7 (≥1 below start). So the cap is start − 1 for both
+    # APAP and CPAP. Evaluated on `new`, so lowering the start pressure can trip it too (not just
+    # raising the ramp pressure).
     if "StartingRampPressure" in new:
-        therapy_p = (new["MinimumTherapyPressure"] if cfg["device_type"] == "APAP"
-                     else new["StartingTherapyPressure"])
+        therapy_p = new["StartingTherapyPressure"]
         if new["StartingRampPressure"] > therapy_p - 1.0:
             sys.exit(f"Refusing: GentleRise Pressure ({new['StartingRampPressure']:.1f}) must be "
-                     f"≤ therapy pressure − 1 = {therapy_p - 1.0:.1f} cmH2O. "
-                     "Lower the ramp pressure or raise the therapy pressure.")
+                     f"≤ starting therapy pressure − 1 = {therapy_p - 1.0:.1f} cmH2O. "
+                     "Lower the ramp pressure or raise the starting therapy pressure.")
 
     if any(n in PRESCRIPTION for n in changes):
         print("WARNING: changing a PRESCRIPTION setting — these are clinician-set therapy "

@@ -338,9 +338,11 @@ class TestConvertEndToEnd(unittest.TestCase):
 
 
 class TestSettingsGentleRiseCap(unittest.TestCase):
-    """GentleRise (StartingRampPressure) must stay >=1 cmH2O below therapy pressure
-    (104214 p.8). apply_and_write validates before any device I/O, so a violating change
-    raises SystemExit and a valid one reaches the --dry-run return."""
+    """GentleRise (StartingRampPressure) must stay >=1 cmH2O below the *StartingTherapyPressure*
+    it ramps up to (104214 p.8; confirmed against the official app, which set GentleRise 9.5 with
+    min 10.0 but start >=12.0 — so the cap is start-1, NOT min-1). apply_and_write validates
+    before any device I/O, so a violating change raises SystemExit and a valid one reaches the
+    --dry-run return."""
 
     def _cfg(self):
         import settings  # noqa: E402
@@ -357,25 +359,36 @@ class TestSettingsGentleRiseCap(unittest.TestCase):
         base.update(kw)
         return types.SimpleNamespace(**base)
 
-    def test_rejects_ramp_pressure_within_1_of_min(self):
+    def test_rejects_ramp_pressure_within_1_of_start(self):
         settings, cfg = self._cfg()
-        # min therapy = 6.0, so ramp must be <= 5.0; 5.5 violates the cap
+        # start therapy = 8.0, so ramp must be <= 7.0; 7.5 violates the cap
         with self.assertRaises(SystemExit) as cm:
-            settings.apply_and_write(cfg, {"StartingRampPressure": 5.5}, self._args())
+            settings.apply_and_write(cfg, {"StartingRampPressure": 7.5}, self._args())
         self.assertIn("GentleRise", str(cm.exception))
 
-    def test_rejects_lowering_min_below_ramp_plus_1(self):
+    def test_allows_low_min_below_ramp(self):
+        # The cap is keyed off start, NOT min: dropping min to 4.0 with ramp 4.0 (min - 1 = 3.0,
+        # which the old min-based rule wrongly rejected) is allowed because start 8.0 gives
+        # 7.0 of headroom. Mirrors the official app's GentleRise 9.5 / min 10.0 / start 12.0.
         settings, cfg = self._cfg()
-        # ramp stays 4.0, but dropping min to 4.0 leaves only 0 headroom -> reject
+        self.assertIsNone(
+            settings.apply_and_write(cfg, {"MinimumTherapyPressure": 4.0}, self._args()))
+
+    def test_rejects_lowering_start_below_ramp_plus_1(self):
+        # start drives the cap, so *lowering the start* can trip it: ramp 7.0, start 7.5 -> 6.5
+        # headroom < ramp -> reject (7.5 still sits within min 6.0 / max 15.0, so the cross-field
+        # check passes and we reach the GentleRise cap).
+        settings, cfg = self._cfg()
+        cfg["fields"]["StartingRampPressure"] = 7.0
         with self.assertRaises(SystemExit) as cm:
-            settings.apply_and_write(cfg, {"MinimumTherapyPressure": 4.0}, self._args())
+            settings.apply_and_write(cfg, {"StartingTherapyPressure": 7.5}, self._args())
         self.assertIn("GentleRise", str(cm.exception))
 
     def test_allows_ramp_pressure_with_headroom(self):
         settings, cfg = self._cfg()
-        # 5.0 is exactly 1.0 below min 6.0 -> allowed; dry-run returns without exit
+        # 7.0 is exactly 1.0 below start 8.0 -> allowed; dry-run returns without exit
         self.assertIsNone(
-            settings.apply_and_write(cfg, {"StartingRampPressure": 5.0}, self._args()))
+            settings.apply_and_write(cfg, {"StartingRampPressure": 7.0}, self._args()))
 
 
 if __name__ == "__main__":

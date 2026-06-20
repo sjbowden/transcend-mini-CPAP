@@ -103,15 +103,19 @@ it after a write. Decoded live by single-field sweeps (2026-06-20), `Configurati
 
 - chars 0–11 `0000aa550100` — **constant** prefix (the `aa55` is a magic marker). Verified
   invariant while sweeping min (10/8/6), max (16/18/20), ramp (0/5/10) and EZEX.
-- chars 12–13 `SS` — **`StartingTherapyPressure ×10`** in hex. Confirmed across a 5-point
-  start sweep: 11.0→`6e` (0x6E=110), 12.0→`78`, 13.0→`82`, 14.0→`8c`, 15.0→`96`. **Min and
-  max do NOT appear** anywhere in the blob (swept ±, blob unchanged).
-- char 14 `F` — a 1-nibble **flag, undetermined**. It was `0` only in the original untouched
-  config and has been `1` through every serial write since, independent of start/min/max/ramp/
-  EZEX (an early "ramp on/off" guess was **disproven** — ramp 0/5/10 all read `1`). Leading
-  hypothesis: a latching "modified outside the official app" / dirty bit (pristine `0` → `1`
-  on the first non-app write). Untested — confirming would need a write via the TranscendGo
-  app to see if it resets to `0`.
+- chars 12–13 `SS` — **`StartingTherapyPressure ×10`** in hex. Confirmed across a 5-point serial
+  sweep (11.0→`6e` (0x6E=110), 12.0→`78`, 13.0→`82`, 14.0→`8c`, 15.0→`96`) plus a 6th point from
+  an official-app write (13.7→`89` (0x89=137)). **Min and max do NOT appear** anywhere in the
+  blob — verified twice: a serial ± sweep and an app write that changed min/max/ramp/EZEX/ramp-
+  pressure together left the blob byte-identical.
+- char 14 `F` — a 1-nibble **sticky latch**. It was `0` only in the original clinic-provisioned
+  config we first read; the first local write flipped it to `1`, and it **stays `1`** through
+  every write since — including an **official-app** write that changed the start pressure and so
+  regenerated the blob (`SS` `78`→`89` for start 12.0→13.7) yet left `F` = `1`. So ordinary
+  writes (app *or* serial) do **not** clear it (the "app resets the dirty bit" hypothesis is
+  disproven, as is the earlier "tracks ramp" guess — ramp 0/5/10 all read `1`). It behaves like
+  a one-way "config modified since factory/clinic provisioning" latch; presumably only a factory
+  reset clears it. Semantics still unproven, but no longer behaviorally open.
 
 So the blob is a firmware-derived shadow of `StartingTherapyPressure` plus a flag bit, **not**
 a user-mappable comfort-flag field. The tool always sends it verbatim; the firmware rewriting
@@ -127,12 +131,13 @@ not be touched** (it recalibrates the pressure sensor).
 | 16 | chars 4–7 `aa55` | magic signature | identified (not data) |
 | 32 | chars 0–3 `0000` + chars 8–11 `0100` | constant | unknown, but inert |
 | 3  | high 3 bits of nibble `F` | constant `0` | unknown, but inert |
-| 1  | low bit of nibble `F` | the `0→1` latch flag | behavior seen, meaning hypothesized |
+| 1  | low bit of nibble `F` | sticky `0→1` "modified" latch | behavior fully characterized; exact meaning unproven |
 
-So **36 of 60 bits are semantically unexplained** (32 + 3 inert constants + 1 flag); 8 are
-decoded and 16 are the magic. Of the 36, **35 never moved** under any setting we vary
-(start/min/max/ramp/EZEX) — almost certainly reserved/version/constant, not hidden settings —
-leaving effectively **one mystery bit** of behavioral interest (the `F` latch).
+So **36 of 60 bits carry no known semantic value** (32 + 3 inert constants + 1 latch); 8 are
+decoded and 16 are the magic. But **nothing is behaviorally open**: 35 of those 36 never move
+under any setting (start/min/max/ramp/EZEX) — reserved/version/constant — and the 1 remaining
+bit is a one-way "config modified" latch that no ordinary write (app or serial) clears. There
+are no hidden settings left to find in the blob.
 
 **App names** for the user-changeable fields. The field names above follow the **Windows**
 app (`EZEX`, `Ramp`) because they come from decompiling it; the **iOS** app uses friendlier
@@ -140,8 +145,11 @@ labels for the same settings (both apps gate the prescription pressures):
 `EZEX` = **AirRelief** (0–3); `StartingRampPressure` = **GentleRise Pressure** (4–10 cmH₂O);
 `RampDurationMinutes` = **GentleRise Duration** (0 = disabled, to 45 min in 5‑min steps).
 The clinician guide (104214 p.8) adds a relative cap: GentleRise Pressure can be set
-**up to 1 cmH₂O below the Therapy Pressure**, and StartingTherapyPressure lies between
-min and max (the apps enforce both; firmware acceptance untested).
+**up to 1 cmH₂O below the Therapy Pressure** — and on APAP "Therapy Pressure" here is the
+**StartingTherapyPressure**, not the min. Confirmed against the official app (2026-06-20): it
+set GentleRise 9.5 with min 10.0 (only 0.5 below the min) but start 12.0/13.7 (≥1 below start),
+so the ramp is bounded by where therapy *starts*, not the APAP floor. `StartingTherapyPressure`
+itself lies between min and max (the apps enforce both; firmware acceptance untested).
 
 **Not every device feature is on the serial link.** *Dry mode* (a post-therapy option that
 runs the blower to dry the tube and mask) has no *setting* visible here: toggling it on/off

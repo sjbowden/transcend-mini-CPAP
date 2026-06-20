@@ -27,11 +27,14 @@
   the first ramp). Press-and-hold accelerates a ramp, so short later ramps are kept as-is.
   (Our current dump has one ramp per session — the two pairs fall in *separate* sessions — so
   output is unchanged here; this is forward-looking robustness.) Locked by a unit test.
-- ✅ **DONE — settings.py enforces GentleRise Pressure ≤ Therapy Pressure − 1** (104214 p.8).
+- ✅ **DONE — settings.py enforces GentleRise Pressure ≤ StartingTherapyPressure − 1** (104214 p.8).
   `apply_and_write` rejects any change leaving < 1 cmH₂O headroom between StartingRampPressure
-  and the therapy pressure it ramps to (the APAP min, or the CPAP set pressure) — evaluated on
-  the merged result, so *lowering* the therapy pressure trips it too, not just raising the ramp.
-  Conservative (firmware behavior untested); validated before any device I/O. Locked by tests.
+  and the **starting** therapy pressure it ramps up to — evaluated on the merged result, so
+  *lowering* the start pressure trips it too, not just raising the ramp. **Corrected 2026-06-20:**
+  was keyed off the APAP *min*, but the official app set GentleRise 9.5 with min 10.0 (only 0.5
+  below min) and start 12.0/13.7 — proving the cap is `start − 1`, not `min − 1`. Fixed for both
+  APAP and CPAP; tests updated (old min-based rejection replaced with the now-allowed low-min case
+  + a start-driven rejection). Validated before any device I/O.
 
 ## Enhancing the SleepHQ upload
 
@@ -122,8 +125,11 @@ more of what the Transcend actually records. Legend:
   in the blob** (swept ±, unchanged). The final nibble `F` is an undetermined flag — was `0`
   only in the pristine never-written config and `1` through every write since, independent of
   start/min/max/ramp/EZEX (the earlier "tracks ramp" guess was **disproven**: ramp 0/5/10 all
-  read `1`). Leading hypothesis: a latching "modified outside the official app" bit. A
-  post-write read-back diff confined to the blob is therefore **expected and benign**; the
-  named settings still verify exactly. (PROTOCOL.md + README.md updated; settings.py verify
-  now treats blob-only changes as a note, not a failure.) Only open question, low value:
-  confirm the `F` bit by writing via the TranscendGo app and checking if it resets to `0`.
+  read `1`). **Resolved 2026-06-20:** the `F` nibble is a **sticky one-way "config modified"
+  latch** — an official-app write that changed the start pressure (`SS` `78`→`89`) regenerated
+  the blob yet left `F` = `1`, so neither app nor serial writes clear it (the "app resets the
+  dirty bit" idea is disproven; presumably only a factory reset clears it). Blob now fully
+  behaviorally accounted (36/60 bits carry no known meaning, but 35 are inert constants + 1 is
+  this latch — no hidden settings remain). A post-write read-back diff confined to the blob is
+  **expected and benign**; settings.py verify treats blob-only changes as a note, not a failure.
+  (PROTOCOL.md bit-accounting + README.md updated.)
