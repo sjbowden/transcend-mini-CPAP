@@ -140,6 +140,16 @@ def calib_offset(raw):
     return (v - 0x10000 if v >= 0x8000 else v) / 10.0
 
 
+def opaque_fields_differing(layout, before_raw, after_raw):
+    """Opaque field names whose raw hex changed between two configs (case-insensitive).
+
+    The firmware regenerates parts of the opaque blob (the start-pressure/latch shadow), so
+    both the write- and restore-verify paths use this to list which opaque fields moved.
+    """
+    return [n for n, _, k in layout
+            if k == "opaque" and before_raw[n].lower() != after_raw[n].lower()]
+
+
 def calib_bytes_differ(a, b, device_type="APAP"):
     """True if the calibration-bearing opaque bytes differ. On APAP that's ConfigurationData[0:4]
     + Reserved (verified positions; chars 12-14 are the firmware-regenerated start/latch shadow
@@ -335,17 +345,16 @@ def apply_and_write(cfg, changes, args):
              else after["fields"][n] == new[n] for n in changes)
     # The firmware regenerates part of ConfigurationData (a derived shadow of the
     # prescription — chars 12-13 = StartingTherapyPressure x10; see PROTOCOL.md), so an
-    # opaque-field change on read-back is benign, NOT a failed write. The named fields we
+    # opaque-field change on read-back is benign, NOT a failed write (apply_and_write writes the
+    # current opaque bytes back verbatim, so it never intends to change them). The named fields we
     # set are the real success criterion.
-    blob_changed = [n for n, _, k in cfg["layout"]
-                    if k == "opaque" and after["raw"][n].lower() != cfg["raw"][n].lower()]
     if not ok:
         print(f"WARNING: read-back did not match the requested settings. Inspect with "
               f"--show; restore with --restore {backup} if needed.")
         print_config(after)
     else:
         print("Verified: all settings updated as requested.")
-        for n in blob_changed:
+        for n in opaque_fields_differing(cfg["layout"], cfg["raw"], after["raw"]):
             print(f"Note: firmware regenerated opaque field {n} "
                   f"({cfg['raw'][n]} -> {after['raw'][n]}) — derived from the prescription, benign.")
 
@@ -401,10 +410,9 @@ def restore(path, args):
         print_config(after)
     else:
         print("Verified: device settings match the snapshot.")
-        for n, _, k in cur["layout"]:
-            if k == "opaque" and after["raw"][n].lower() != saved["raw"][n].lower():
-                print(f"Note: firmware regenerated opaque field {n} "
-                      f"({saved['raw'][n]} -> {after['raw'][n]}) — non-calibration start/latch bytes, benign.")
+        for n in opaque_fields_differing(cur["layout"], saved["raw"], after["raw"]):
+            print(f"Note: firmware regenerated opaque field {n} "
+                  f"({saved['raw'][n]} -> {after['raw'][n]}) — non-calibration start/latch bytes, benign.")
 
 
 def diff_blob(path, args):

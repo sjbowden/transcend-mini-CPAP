@@ -353,6 +353,16 @@ class TestSettingsGentleRiseCap(unittest.TestCase):
         return settings, {"serial": "B0000000", "device_type": "APAP",
                           "layout": settings.LAYOUT_APAP, "fields": fields, "raw": raw}
 
+    def _cpap_cfg(self):
+        # StandardCPAP ('A'-serial): no min/max, single set pressure; 28-char ConfigurationData,
+        # 4-char Reserved. The GentleRise cap must key off StartingTherapyPressure here too.
+        import settings  # noqa: E402
+        fields = {"StartingTherapyPressure": 9.0, "RampDurationMinutes": 10,
+                  "StartingRampPressure": 4.0}
+        raw = {"ConfigurationData": "0" * 28, "Reserved": "0" * 4}
+        return settings, {"serial": "A0000000", "device_type": "CPAP",
+                          "layout": settings.LAYOUT_CPAP, "fields": fields, "raw": raw}
+
     def _args(self, **kw):
         import types
         base = dict(allow_prescription=True, dry_run=True, yes=True, port="COM_TEST")
@@ -389,6 +399,20 @@ class TestSettingsGentleRiseCap(unittest.TestCase):
         # 7.0 is exactly 1.0 below start 8.0 -> allowed; dry-run returns without exit
         self.assertIsNone(
             settings.apply_and_write(cfg, {"StartingRampPressure": 7.0}, self._args()))
+
+    def test_cpap_gentlerise_cap_uses_start(self):
+        # CPAP has no min field; the cap must still key off StartingTherapyPressure (9.0),
+        # so ramp must be <= 8.0 — 9.0 violates it. Also exercises the no-min cross-field path.
+        settings, cfg = self._cpap_cfg()
+        with self.assertRaises(SystemExit) as cm:
+            settings.apply_and_write(cfg, {"StartingRampPressure": 9.0}, self._args())
+        self.assertIn("GentleRise", str(cm.exception))
+
+    def test_cpap_gentlerise_allowed_with_headroom(self):
+        # 8.0 is exactly 1.0 below the CPAP set pressure 9.0 -> allowed; dry-run returns
+        settings, cfg = self._cpap_cfg()
+        self.assertIsNone(
+            settings.apply_and_write(cfg, {"StartingRampPressure": 8.0}, self._args()))
 
 
 class TestCalibrationGuard(unittest.TestCase):
