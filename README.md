@@ -184,25 +184,31 @@ python3 settings.py --port COM3 --set-min 11 --set-max 14 --allow-prescription
 > clinician‑set values — changing them is your responsibility; verify with your provider.
 > Calibration is never writable. Every write is reversible via the auto‑saved backup.
 
-### The opaque `ConfigurationData` blob
+### The `ConfigurationData` blob — now decoded
 
-The config response carries a 15‑char opaque blob (`0000aa550100XXY`) with an `aa55` magic
-marker. We tried to map its bits by differential diffing, but the iOS app turns out to
-expose **only named fields** — *AirRelief* (=`EZEX`), *GentleRise Pressure*
-(=`StartingRampPressure`), *GentleRise Duration* (=`RampDurationMinutes`), and the
-(locked) prescription pressures — so there's no hidden auto‑start/stop or alert toggle to
-discover. The blob is **not** purely factory‑fixed, though: single‑field sweeps decoded it as
-`0000aa550100` + `SS` + `F`. The `0000aa550100` prefix is constant; **`SS` (chars 12–13) is
-`StartingTherapyPressure ×10`** in hex (confirmed 11→`6e` … 15→`96`), which the firmware
-rewrites after a write — so raising the start 11.0→12.0 turns `…6e0` into `…781`. **Min and
-max do not appear in the blob.** The final nibble `F` is a sticky "config modified" latch: `0`
-only in the original clinic‑provisioned config, `1` after the first local write, and it stays
-`1` through every write since — including an official‑app write that regenerated the blob,
-which rules out the "the app resets it" idea (only a factory reset likely clears it). The tool
-always sends the blob unchanged (read‑modify‑write); the device
-regenerating `SS`/`F` on its own is benign, so `settings.py` verifies the *named* fields and
-reports any blob change as an informational note rather than a failure. `--snapshot`/`--diff`
-show exactly which bytes the firmware moved.
+The config response carries a 15‑char "opaque" blob (with an `aa55` magic marker) that turned
+out **not** to be opaque at all — single‑field sweeps fully mapped it as
+**`CCCC aa55 GGGG SS F`**:
+
+- **`CCCC` (chars 0–3) = the pressure‑sensor calibration offset × 10** (signed). It read `0000`
+  for months only because the offset was `+0.0`; setting it via the app's calibrate feature
+  moved it exactly (`−0.3`→`fffd`, `+0.9`→`0009`, `−0.9`→`fff7`). The 5‑char **`Reserved`** field
+  carries the *same* offset in raw sensor counts (`×~64`).
+- **`aa55`** — magic marker.
+- **`GGGG` (chars 8–11) = `0100`** — constant; `0x0100` = unity in 8.8 fixed‑point, so very likely
+  the calibration **gain** (the app exposes only the offset, so we can't sweep it to confirm).
+- **`SS` (chars 12–13) = `StartingTherapyPressure × 10`** (confirmed 11→`6e` … 15→`96`).
+- **`F` (last nibble) = a sticky "config‑modified" latch**: `0` only in the original
+  clinic‑provisioned config, `1` after the first local write, and it stays `1` through every
+  write since (an official‑app write that regenerated the blob, and a Reset‑Compliance, both
+  left it `1`). **Min and max do not appear in the blob.**
+
+So the firmware regenerates the calibration/`SS`/`F` bytes itself. The tool always sends the blob
+back **unchanged** (read‑modify‑write), which is also what keeps a config write from disturbing
+the calibration stored inside it; `settings.py` verifies the *named* fields and reports any
+firmware‑side blob change as an informational note, not a failure. `--snapshot`/`--diff` show
+exactly which bytes moved. (Corollary: don't `--restore` a *stale* snapshot blindly — its blob
+carries the calibration that was current when it was taken.)
 
 ## How it was reverse‑engineered
 

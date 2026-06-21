@@ -85,10 +85,10 @@ the serial**: `A`=StandardCPAP, `B`=AutoPAP, `C`=CPAP+EZEX. The same transport a
 | Pos | Field | Len | Read | Write |
 |-----|-------|-----|------|-------|
 | 0 | StartingTherapyPressure | 4 | hex/10 | int(v·10)→hex |
-| 1 | **ConfigurationData** | 15 | opaque | passthrough |
+| 1 | **ConfigurationData** | 15 | opaque (≈ calib offset + start + latch) | passthrough |
 | 2 | MinimumTherapyPressure | 4 | hex/10 | int(v·10)→hex |
 | 3 | MaximumTherapyPressure | 4 | hex/10 | int(v·10)→hex |
-| 4 | **Reserved** | 5 | opaque | passthrough |
+| 4 | **Reserved** | 5 | opaque (= calib offset ×~64) | passthrough |
 | 5 | RampDurationMinutes | 4 | hex | int→hex |
 | 6 | EZEX (relief level) | 4 | hex/10 | int(v·10)→hex |
 | 7 | StartingRampPressure | 4 | hex/10 | int(v·10)→hex |
@@ -101,8 +101,14 @@ them unchanged — but `ConfigurationData` is **not static**: the firmware regen
 it after a write. Decoded live by single-field sweeps (2026-06-20), `ConfigurationData` is
 15 hex chars **`0000aa550100` `SS` `F`**:
 
-- chars 0–11 `0000aa550100` — **constant** prefix (the `aa55` is a magic marker). Verified
-  invariant while sweeping min (10/8/6), max (16/18/20), ramp (0/5/10) and EZEX.
+- chars 0–3 — **calibration offset × 10**, signed 16-bit (0.1 cmH₂O units). Decoded by setting
+  the offset via the app's calibrate feature and reading back: `+0.0`→`0000`, `−0.3`→`fffd`
+  (−3), `+0.9`→`0009`, `−0.9`→`fff7` (−9) — matches the `Tb3` calibration getter exactly. It
+  read `0000` for months only because the offset was `+0.0`; it is **not** a constant.
+- chars 4–7 `aa55` — magic marker (constant).
+- chars 8–11 `0100` — **constant**; did not move when the calibration offset was swept ±0.9, so
+  it's not the offset. `0x0100` = 256 = unity in 8.8 fixed-point → **likely the calibration
+  gain/slope** (the app exposes only the offset, not the gain, so we can't vary it to confirm).
 - chars 12–13 `SS` — **`StartingTherapyPressure ×10`** in hex. Confirmed across a 5-point serial
   sweep (11.0→`6e` (0x6E=110), 12.0→`78`, 13.0→`82`, 14.0→`8c`, 15.0→`96`) plus a 6th point from
   an official-app write (13.7→`89` (0x89=137)). **Min and max do NOT appear** anywhere in the
@@ -118,36 +124,38 @@ it after a write. Decoded live by single-field sweeps (2026-06-20), `Configurati
   reset clears it (a **"Reset Compliance" did NOT** clear it — `F` stayed `1` — so it's tied to
   config, not compliance/usage state). Semantics still unproven, but no longer behaviorally open.
 
-So the blob is a firmware-derived shadow of `StartingTherapyPressure` plus a flag bit, **not**
-a user-mappable comfort-flag field. The tool always sends it verbatim; the firmware rewriting
-`SS`/`F` means a post-write read-back difference *confined to `ConfigurationData`* is expected
-and benign (the named settings still verify exactly). Calibration `Tb4` is writable but **must
-not be touched** (it recalibrates the pressure sensor).
+So the blob is a firmware-derived record of the **calibration offset** + **start pressure** (plus
+the gain candidate and the latch), **not** a user-mappable comfort-flag field. The tool always
+sends it verbatim; the firmware rewriting the calibration/`SS`/`F` bytes means a post-write
+read-back difference *confined to `ConfigurationData`* is expected and benign (the named settings
+still verify exactly). Calibration `Tb4` is writable but **must not be touched** (it recalibrates
+the pressure sensor) — and because the offset lives in the blob, RMW preserving it verbatim is
+what keeps a config write from disturbing calibration.
 
-**Bit accounting (60 bits total = 15 hex chars):**
+**The `Reserved` field (5 hex) also holds the calibration offset**, in a *different* unit: its low
+16 bits = **offset × ~64** (signed, looks like raw sensor counts), high nibble constant `0`. Same
+sweep: `+0.0`→`00000`, `−0.3`→`0ffed` (−19), `+0.9`→`0003a` (+58), `−0.9`→`0ffc6` (−58). So the
+offset is stored twice — `ConfigurationData[0:4]` at 0.1 cmH₂O resolution (×10) and `Reserved` at
+raw-count resolution (×~64). `Reserved` stayed `00000` through every pressure/ramp/EZEX change, so
+it is calibration-only, not a checksum.
+
+**Bit accounting — `ConfigurationData` (60 bits = 15 hex chars):**
 
 | Bits | Span | Content | Status |
 |-----:|------|---------|--------|
-| 8  | chars 12–13 `SS` | `StartingTherapyPressure ×10` | **decoded** |
+| 16 | chars 0–3 | calibration offset × 10 (signed) | **decoded** |
 | 16 | chars 4–7 `aa55` | magic signature | identified (not data) |
-| 32 | chars 0–3 `0000` + chars 8–11 `0100` | constant | likely **factory calibration** (offset+gain) |
-| 3  | high 3 bits of nibble `F` | constant `0` | unknown, but inert |
-| 1  | low bit of nibble `F` | sticky `0→1` "modified" latch | behavior fully characterized; exact meaning unproven |
+| 16 | chars 8–11 `0100` | likely calibration **gain** (unity = 0x0100) | constant; can't vary to confirm |
+| 8  | chars 12–13 `SS` | `StartingTherapyPressure ×10` | **decoded** |
+| 3  | high 3 bits of nibble `F` | constant `0` | inert |
+| 1  | low bit of nibble `F` | sticky `0→1` "modified" latch | characterized; exact meaning unproven |
 
-So **36 of 60 bits carry no known semantic value** (32 + 3 inert constants + 1 latch); 8 are
-decoded and 16 are the magic. But **nothing is behaviorally open**: 35 of those 36 never move
-under any *user* setting (start/min/max/ramp/EZEX) and the 1 remaining bit is a one-way "config
-modified" latch that no ordinary write clears. There are no hidden user settings left in the blob.
-
-**Leading hypothesis for the 32 constant bits: factory calibration constants** (the app has a
-calibration feature; `Tb4` writes it). They'd be constant for us precisely because we never
-recalibrate. Read-only correlation (2026-06-20): the calibration *offset* `Tb3` = `+0.0` cmH₂O,
-and the `0000` block (chars 0–3) is all-zero — **consistent** with the offset being stored there
-(a zero offset → `0000`), though not provable while the offset is 0. The non-zero `0100` (chars
-8–11) is a candidate for the **gain/slope** (`Tb3` returns only an offset, no gain). Confirming
-needs a *non-zero* offset to watch `0000` change — i.e. the calibration rig — so it stays an
-unproven hypothesis. This is also why blindly writing the blob is dangerous: corrupting these
-bytes would **mis-calibrate the pressure sensor**, which is exactly why RMW preserves it verbatim.
+**The blob is essentially fully explained.** 24 bits are decoded data (calibration offset + start
+pressure), 16 are the magic, 16 are the gain (constant, strong hypothesis), and the last nibble is
+the latch. The earlier "32 inert constant bits" turned out to be the **calibration block** — it
+only looked inert because the offset was `+0.0` and the gain is fixed at unity. **Your calibration
+hypothesis (the constant bits are calibration) was correct.** The one remaining soft spot is
+confirming `0100` is the gain (the app doesn't expose a gain control to sweep).
 
 **App names** for the user-changeable fields. The field names above follow the **Windows**
 app (`EZEX`, `Ramp`) because they come from decompiling it; the **iOS** app uses friendlier
@@ -170,15 +178,26 @@ counter `Tbc` (+2m19s in one test) while the **patient-time** counter `Tb8` stay
 is the general rule for the two counters — `Tbc` = all blower runtime (ramp + mask-off + dry
 cycles), `Tb8` = actual breathing only — which is why blower time exceeds patient time.
 
-**"Reset Compliance" (the app/device button) is the device's only erase — and it's selective.**
-Verified live (2026-06-20) by reading before/after: it **clears the event log** (a re-pull
-returned 0 valid records, down from 596 events / 13 sessions), **zeroes `Tb8`** (patient time)
-and the session histogram — **but does NOT reset `Tbc`** (blower runtime stayed 14h41m59s). So
-`Tbc` is a **lifetime hardware counter** (motor hours, not resettable from the UI), while `Tb8`
-is the resettable patient/compliance figure. It leaves the **config untouched** (prescription,
-comfort, `Reserved`, and the `ConfigurationData` blob — including the `F` latch — all unchanged),
-confirming `F` is a *config-modified* latch, not compliance state (a compliance reset doesn't
-clear it; presumably only a factory reset would).
+**"Reset Compliance" is a single bare `Taf` command; the firmware does the rest.** The desktop
+app's handler just sends one parameterless `Taf` (`class ResetComplianceCommand : base("Taf")`,
+no `CommandArgument` fields) and resets its own in-memory `EventsInQueue` counter — it does **not**
+orchestrate per-field clears, so all of the selectivity below is firmware-defined. It's the
+device's only erase. Verified live (2026-06-20) by a full before/after read:
+
+*Cleared (zeroed/erased):*
+- **Event log** — the compliance/event records (a re-pull returned **0 valid records**, down from
+  596 events / 13 sessions).
+- **`Tb8`** patient therapy time → `0h00m00s` (was 13h58m08s).
+- **Session histogram** (≥8h / 6–8h / 4–6h) → `0 / 0 / 0`.
+- App-side only: its `EventsInQueue` display counter → 0 (not a device effect).
+
+*Preserved (untouched):*
+- **`Tbc`** blower runtime → unchanged (`14h41m59s`) — a **lifetime hardware/motor-hours counter**,
+  not resettable from the UI (`Tb8` is the resettable patient/compliance figure).
+- **Prescription** (min/max/start) and **comfort** (EZEX, ramp duration, GentleRise pressure).
+- **`ConfigurationData`** (incl. the `F` latch, still `1`) and **`Reserved`** — so the `F` latch is
+  *config-modified* state, not compliance state; a compliance reset does **not** clear it
+  (presumably only a factory reset would). Calibration offset (`Tb3`) is preserved too.
 
 ### Bug in the official desktop app: it under-reports the APAP minimum
 

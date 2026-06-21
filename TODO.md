@@ -129,11 +129,14 @@ more of what the Transcend actually records. Legend:
   latch** — an official-app write that changed the start pressure (`SS` `78`→`89`) regenerated
   the blob yet left `F` = `1`, so neither app nor serial writes clear it (the "app resets the
   dirty bit" idea is disproven; presumably only a factory reset clears it). Blob now fully
-  behaviorally accounted (36/60 bits carry no known meaning, but 35 are inert constants + 1 is
-  this latch — no hidden settings remain). A post-write read-back diff confined to the blob is
-  **expected and benign**; settings.py verify treats blob-only changes as a note, not a failure.
-  (PROTOCOL.md bit-accounting + README.md updated.) Remaining (unprovable without the rig):
-  the 32 constant bits are **likely factory calibration** (offset+gain) — the app has a
-  calibration feature, `Tb3` reads the offset (currently `+0.0`), and the `0000` block is
-  all-zero, *consistent* with storing a zero offset; `0100` is a gain candidate. Confirming
-  needs a non-zero calibration offset (calibration equipment) to watch the bytes move.
+  this latch). A post-write read-back diff confined to the blob is **expected and benign**;
+  settings.py verify treats blob-only changes as a note, not a failure.
+  **Calibration block CONFIRMED & DECODED 2026-06-20** (no rig needed — used the app's own
+  calibrate-offset control): the "constant" `0000` region (chars 0-3) is the **pressure-sensor
+  calibration offset ×10, signed** (`+0.0`→`0000`, `−0.3`→`fffd`, `+0.9`→`0009`, `−0.9`→`fff7`),
+  and the `Reserved` field carries the same offset in raw counts (`×~64`). The lone remaining
+  constant `0100` (chars 8-11) is `0x100`=unity → **likely the gain** (app exposes no gain
+  control to sweep). So the blob is `CCCC aa55 GGGG SS F` = calib-offset + magic + gain + start
+  + latch; **fully mapped**. (PROTOCOL.md bit-accounting + README.md updated.) New caveat: since
+  the blob/`Reserved` store calibration, `--restore` of a *stale* snapshot could revert the
+  calibration — don't restore old snapshots blindly.
