@@ -203,13 +203,18 @@ device's only erase. Verified live (2026-06-20) by a full before/after read:
 
 | Reset | How | Clears | Keeps |
 |-------|-----|--------|-------|
-| **Button reset** | device buttons | error/alarm conditions only | everything else (config, data, `Tbc`, `F`) |
+| **Button reset** | hold power button until LEDs stop flashing (104347 troubleshooting) | error/alarm conditions only — reboots to Standby | everything else (config, data, `Tbc`, `F`) |
 | **Reset Compliance** | app / `Taf` | event log, `Tb8`, session histogram | config, calibration, `Tbc` (lifetime), `F` latch |
-| **Factory reset** | Somnetics support only (104378 p.19) | unobserved — presumably config + the `F` latch | — |
+| **Factory reset** | Somnetics support only (104378 p.18) | unobserved — presumably config + the `F` latch | — |
 
 The button reset was tested live (2026-06-20): it left the entire config/data baseline byte-for-byte
-identical. There is **no user-accessible factory reset**, so clearing the `F` latch (and reverting
-the prescription to factory defaults) can't be triggered or observed without support.
+identical. There is **no user-accessible factory reset**, confirmed three ways: (1) the **serial
+command set contains no factory-reset/restore-defaults command** — the full `PAPCommand` set
+enumerated from the decompile is the getters + `T11` (push blower), `T00` (no-op), `Tcc`/`Tac`
+(write config), `Tb4` (write calibration), and `Taf` (reset compliance), nothing else; (2) the
+Micro 510 manual's only "reset" is the power-button soft reset above; (3) the mobile-app guide
+says to factory-reset "by contacting Transcend Support." So clearing the `F` latch (and reverting
+the prescription to factory defaults) can't be triggered or observed without Somnetics.
 
 ### Bug in the official desktop app: it under-reports the APAP minimum
 
