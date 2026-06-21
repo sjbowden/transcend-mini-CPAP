@@ -115,7 +115,8 @@ it after a write. Decoded live by single-field sweeps (2026-06-20), `Configurati
   writes (app *or* serial) do **not** clear it (the "app resets the dirty bit" hypothesis is
   disproven, as is the earlier "tracks ramp" guess — ramp 0/5/10 all read `1`). It behaves like
   a one-way "config modified since factory/clinic provisioning" latch; presumably only a factory
-  reset clears it. Semantics still unproven, but no longer behaviorally open.
+  reset clears it (a **"Reset Compliance" did NOT** clear it — `F` stayed `1` — so it's tied to
+  config, not compliance/usage state). Semantics still unproven, but no longer behaviorally open.
 
 So the blob is a firmware-derived shadow of `StartingTherapyPressure` plus a flag bit, **not**
 a user-mappable comfort-flag field. The tool always sends it verbatim; the firmware rewriting
@@ -169,6 +170,16 @@ counter `Tbc` (+2m19s in one test) while the **patient-time** counter `Tb8` stay
 is the general rule for the two counters — `Tbc` = all blower runtime (ramp + mask-off + dry
 cycles), `Tb8` = actual breathing only — which is why blower time exceeds patient time.
 
+**"Reset Compliance" (the app/device button) is the device's only erase — and it's selective.**
+Verified live (2026-06-20) by reading before/after: it **clears the event log** (a re-pull
+returned 0 valid records, down from 596 events / 13 sessions), **zeroes `Tb8`** (patient time)
+and the session histogram — **but does NOT reset `Tbc`** (blower runtime stayed 14h41m59s). So
+`Tbc` is a **lifetime hardware counter** (motor hours, not resettable from the UI), while `Tb8`
+is the resettable patient/compliance figure. It leaves the **config untouched** (prescription,
+comfort, `Reserved`, and the `ConfigurationData` blob — including the `F` latch — all unchanged),
+confirming `F` is a *config-modified* latch, not compliance state (a compliance reset doesn't
+clear it; presumably only a factory reset would).
+
 ### Bug in the official desktop app: it under-reports the APAP minimum
 
 The **Windows desktop app (`Somnetics.TranscendGo.Client` v1.1.2.0) displays a wrong, too-low
@@ -193,6 +204,12 @@ Confirmed live: setting the device to min 13 / start 14 over serial made the des
 `min 10 / start 14`, exactly as the code predicts, while the **BLE/MySleepDash app and this
 toolkit's serial read both showed the correct 13**. Takeaway: for the Micro 510, **don't trust
 the desktop app's minimum** — the device, the serial read, and the mobile app are authoritative.
+
+**It's a *cold-load-only* bug.** The clamp only misfires while `_startingTherapyPressure` still
+holds its default — i.e. on the first config load. An in-session **re-read** (after `start` has
+been populated with the real value) clamps `min` against the real start and shows it correctly.
+Confirmed live: after a "Reset Compliance" the app re-read the config and the minimum **corrected
+itself** to the real value, because by then `_startingTherapyPressure` was already 12, not 10.
 
 ## Download algorithm (from `TranSyncManager.GetEventStrings`)
 1. `Ta8` → `address`.
