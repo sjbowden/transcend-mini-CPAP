@@ -121,22 +121,34 @@ def encode_value(kind, value, length):
 
 
 # The pressure-sensor calibration offset is stored inside the "opaque" config (see PROTOCOL.md):
-# ConfigurationData[0:4] = offset x10 (signed 16-bit), and Reserved carries it in raw counts.
-# These are firmware/calibration-owned bytes — settings.py never sets them deliberately, but a
-# --restore of a stale snapshot would write old values, so we guard against changing them.
+# on APAP, ConfigurationData[0:4] = offset x10 (signed 16-bit) and Reserved carries it in raw
+# counts. These are firmware/calibration-owned bytes — settings.py never sets them deliberately,
+# but a --restore of a stale snapshot would write old values, so we guard against changing them.
+# NOTE: the byte positions were verified on APAP only. CPAP uses a different layout (28-char
+# ConfigurationData, 4-char Reserved) where the offset position is unknown, so there we compare
+# the *whole* opaque region conservatively rather than trust an APAP-derived offset.
 def calib_offset(raw):
-    """Calibration offset in cmH2O decoded from ConfigurationData[0:4] (signed x10); None if absent."""
+    """APAP calibration offset in cmH2O from ConfigurationData[0:4] (signed x10); None if absent
+    or non-hex (e.g. a corrupted snapshot) — callers fall back to a generic message."""
     cd = raw.get("ConfigurationData", "")
     if len(cd) < 4:
         return None
-    v = int(cd[:4], 16)
+    try:
+        v = int(cd[:4], 16)
+    except ValueError:
+        return None
     return (v - 0x10000 if v >= 0x8000 else v) / 10.0
 
 
-def calib_bytes_differ(a, b):
-    """True if the calibration-bearing bytes (ConfigurationData[0:4] + Reserved) differ."""
+def calib_bytes_differ(a, b, device_type="APAP"):
+    """True if the calibration-bearing opaque bytes differ. On APAP that's ConfigurationData[0:4]
+    + Reserved (verified positions; chars 12-14 are the firmware-regenerated start/latch shadow
+    and are NOT calibration). On any other layout the offset position is unverified, so compare
+    the full opaque region — conservative (may over-warn, never silently misses a change)."""
     def key(raw):
-        return (raw.get("ConfigurationData", "")[:4].lower(), raw.get("Reserved", "").lower())
+        cd = raw.get("ConfigurationData", "")
+        cd = cd[:4] if device_type == "APAP" else cd
+        return (cd.lower(), raw.get("Reserved", "").lower())
     return key(a) != key(b)
 
 
@@ -351,10 +363,11 @@ def restore(path, args):
     # Calibration guard: the snapshot's opaque bytes carry the pressure-sensor calibration that
     # was current when it was saved. If that differs from the device now, restoring it could
     # change the calibration — refuse unless explicitly allowed.
-    if calib_bytes_differ(saved["raw"], cur["raw"]):
+    is_apap = cur["device_type"] == "APAP"
+    if calib_bytes_differ(saved["raw"], cur["raw"], cur["device_type"]):
         so, co = calib_offset(saved["raw"]), calib_offset(cur["raw"])
         detail = (f"snapshot {so:+.1f} vs device {co:+.1f} cmH2O"
-                  if so is not None and co is not None else "snapshot vs device differ")
+                  if is_apap and so is not None and co is not None else "snapshot vs device differ")
         print(f"WARNING: this snapshot's CALIBRATION bytes differ from the device "
               f"({detail}); restoring could change the pressure-sensor calibration.")
         if not getattr(args, "allow_calibration_change", False) and not args.dry_run:
@@ -369,20 +382,29 @@ def restore(path, args):
         sys.exit(f"Restore FAILED — device replied {resp!r} (expected {WRITE_ACK}).")
     print(f"Device acknowledged ({resp}). Verifying...")
     after = read_config(args.port)
-    ok = all(abs(after["fields"][n] - saved["fields"][n]) < 1e-6
-             for n, _, k in cur["layout"] if k != "opaque")
-    # Opaque blob is firmware-regenerated (see apply_and_write) — report a difference, but
-    # don't treat it as a failed restore; the named settings are what matter.
-    blob_changed = [n for n, _, k in cur["layout"]
-                    if k == "opaque" and after["raw"][n].lower() != saved["raw"][n].lower()]
-    if not ok:
+    fields_ok = all(abs(after["fields"][n] - saved["fields"][n]) < 1e-6
+                    for n, _, k in cur["layout"] if k != "opaque")
+    # A faithful restore must reproduce the snapshot's CALIBRATION bytes too — that's the load-
+    # bearing opaque content (and the whole point of --allow-calibration-change). The firmware
+    # regenerates the start-pressure shadow / latch bytes of the blob, which we treat as benign.
+    calib_ok = not calib_bytes_differ(after["raw"], saved["raw"], cur["device_type"])
+    if not fields_ok:
         print("WARNING: read-back does not match the snapshot's settings. Inspect with --show.")
+        print_config(after)
+    elif not calib_ok:
+        so, co = calib_offset(saved["raw"]), calib_offset(after["raw"])
+        detail = (f"requested {so:+.1f} but device reads {co:+.1f} cmH2O"
+                  if is_apap and so is not None and co is not None
+                  else "the device kept its own calibration bytes")
+        print(f"WARNING: the snapshot's CALIBRATION did not take ({detail}); the write was NOT "
+              f"faithfully applied. Inspect with --show.")
         print_config(after)
     else:
         print("Verified: device settings match the snapshot.")
-        for n in blob_changed:
-            print(f"Note: firmware regenerated opaque field {n} "
-                  f"({saved['raw'][n]} -> {after['raw'][n]}) — derived from the prescription, benign.")
+        for n, _, k in cur["layout"]:
+            if k == "opaque" and after["raw"][n].lower() != saved["raw"][n].lower():
+                print(f"Note: firmware regenerated opaque field {n} "
+                      f"({saved['raw'][n]} -> {after['raw'][n]}) — non-calibration start/latch bytes, benign.")
 
 
 def diff_blob(path, args):

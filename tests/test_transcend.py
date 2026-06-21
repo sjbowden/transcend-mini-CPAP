@@ -408,11 +408,23 @@ class TestCalibrationGuard(unittest.TestCase):
     def test_calib_offset_none_when_too_short(self):
         self.assertIsNone(self.s.calib_offset({"ConfigurationData": "00"}))
 
+    def test_calib_offset_none_when_non_hex(self):
+        # a corrupted/hand-edited snapshot must degrade to None, not raise ValueError
+        self.assertIsNone(self.s.calib_offset({"ConfigurationData": "xxxxaa550100781"}))
+
     def test_differ_false_when_calib_bytes_identical(self):
-        # same calibration (CC + Reserved), even though SS differs (start 12 vs 14) -> no diff
+        # APAP: same calibration (CC + Reserved), even though SS differs (start 12 vs 14) -> no diff
         a = {"ConfigurationData": "0000aa550100781", "Reserved": "00000"}
         b = {"ConfigurationData": "0000aa5501008c1", "Reserved": "00000"}
-        self.assertFalse(self.s.calib_bytes_differ(a, b))
+        self.assertFalse(self.s.calib_bytes_differ(a, b, "APAP"))
+
+    def test_differ_cpap_compares_full_blob(self):
+        # CPAP positions are unverified, so the guard conservatively compares the WHOLE blob:
+        # a difference past char 4 (which APAP treats as the benign start/latch shadow) must flag.
+        a = {"ConfigurationData": "0000aa550100781", "Reserved": "00000"}
+        b = {"ConfigurationData": "0000aa5501008c1", "Reserved": "00000"}
+        self.assertFalse(self.s.calib_bytes_differ(a, b, "APAP"))   # APAP: benign shadow, no diff
+        self.assertTrue(self.s.calib_bytes_differ(a, b, "CPAP"))    # CPAP: conservative, flagged
 
     def test_differ_true_on_configdata_offset(self):
         a = {"ConfigurationData": "0000aa550100781", "Reserved": "00000"}
