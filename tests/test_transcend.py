@@ -391,5 +391,39 @@ class TestSettingsGentleRiseCap(unittest.TestCase):
             settings.apply_and_write(cfg, {"StartingRampPressure": 7.0}, self._args()))
 
 
+class TestCalibrationGuard(unittest.TestCase):
+    """The pressure-sensor calibration offset lives in ConfigurationData[0:4] (signed x10) and
+    Reserved. --restore guards against changing it; these test the pure decode/compare helpers
+    against the live-measured points (PROTOCOL.md)."""
+
+    def setUp(self):
+        import settings  # noqa: E402
+        self.s = settings
+
+    def test_calib_offset_decodes_measured_points(self):
+        for cd4, expect in [("0000", 0.0), ("fffd", -0.3), ("0009", 0.9), ("fff7", -0.9)]:
+            self.assertAlmostEqual(
+                self.s.calib_offset({"ConfigurationData": cd4 + "aa550100781"}), expect, places=6)
+
+    def test_calib_offset_none_when_too_short(self):
+        self.assertIsNone(self.s.calib_offset({"ConfigurationData": "00"}))
+
+    def test_differ_false_when_calib_bytes_identical(self):
+        # same calibration (CC + Reserved), even though SS differs (start 12 vs 14) -> no diff
+        a = {"ConfigurationData": "0000aa550100781", "Reserved": "00000"}
+        b = {"ConfigurationData": "0000aa5501008c1", "Reserved": "00000"}
+        self.assertFalse(self.s.calib_bytes_differ(a, b))
+
+    def test_differ_true_on_configdata_offset(self):
+        a = {"ConfigurationData": "0000aa550100781", "Reserved": "00000"}
+        b = {"ConfigurationData": "fffdaa550100781", "Reserved": "0ffed"}
+        self.assertTrue(self.s.calib_bytes_differ(a, b))
+
+    def test_differ_true_on_reserved_only(self):
+        a = {"ConfigurationData": "0000aa550100781", "Reserved": "00000"}
+        b = {"ConfigurationData": "0000aa550100781", "Reserved": "0003a"}
+        self.assertTrue(self.s.calib_bytes_differ(a, b))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -120,6 +120,26 @@ def encode_value(kind, value, length):
     return format(iv, "X").rjust(length, "0")
 
 
+# The pressure-sensor calibration offset is stored inside the "opaque" config (see PROTOCOL.md):
+# ConfigurationData[0:4] = offset x10 (signed 16-bit), and Reserved carries it in raw counts.
+# These are firmware/calibration-owned bytes — settings.py never sets them deliberately, but a
+# --restore of a stale snapshot would write old values, so we guard against changing them.
+def calib_offset(raw):
+    """Calibration offset in cmH2O decoded from ConfigurationData[0:4] (signed x10); None if absent."""
+    cd = raw.get("ConfigurationData", "")
+    if len(cd) < 4:
+        return None
+    v = int(cd[:4], 16)
+    return (v - 0x10000 if v >= 0x8000 else v) / 10.0
+
+
+def calib_bytes_differ(a, b):
+    """True if the calibration-bearing bytes (ConfigurationData[0:4] + Reserved) differ."""
+    def key(raw):
+        return (raw.get("ConfigurationData", "")[:4].lower(), raw.get("Reserved", "").lower())
+    return key(a) != key(b)
+
+
 def read_usage(port):
     """Device usage counters: Tbc (blower runtime) and Tb8 (patient therapy time).
 
@@ -328,6 +348,18 @@ def restore(path, args):
     print(f"Restoring settings from {path}:")
     print_config(cfg)
     print(f"\nWrite command: {cmd}")
+    # Calibration guard: the snapshot's opaque bytes carry the pressure-sensor calibration that
+    # was current when it was saved. If that differs from the device now, restoring it could
+    # change the calibration — refuse unless explicitly allowed.
+    if calib_bytes_differ(saved["raw"], cur["raw"]):
+        so, co = calib_offset(saved["raw"]), calib_offset(cur["raw"])
+        detail = (f"snapshot {so:+.1f} vs device {co:+.1f} cmH2O"
+                  if so is not None and co is not None else "snapshot vs device differ")
+        print(f"WARNING: this snapshot's CALIBRATION bytes differ from the device "
+              f"({detail}); restoring could change the pressure-sensor calibration.")
+        if not getattr(args, "allow_calibration_change", False) and not args.dry_run:
+            sys.exit("Refusing the restore to avoid altering calibration. Re-run with "
+                     "--allow-calibration-change if you truly intend to change it.")
     if args.dry_run:
         print("[dry-run] nothing sent."); return
     if not args.yes and input("Proceed? type 'yes': ").strip().lower() != "yes":
@@ -390,6 +422,9 @@ def main():
     ap.add_argument("--snapshot", metavar="FILE", help="save current config to FILE")
     ap.add_argument("--diff", metavar="FILE", help="diff current config against a saved snapshot")
     ap.add_argument("--restore", metavar="FILE", help="re-write a saved snapshot to the device")
+    ap.add_argument("--allow-calibration-change", action="store_true",
+                    help="permit a --restore whose snapshot carries a different calibration "
+                         "(refused by default to protect the pressure-sensor calibration)")
     args = ap.parse_args()
     global TRANSPORT
     TRANSPORT = args.transport

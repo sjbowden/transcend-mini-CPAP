@@ -207,8 +207,10 @@ So the firmware regenerates the calibration/`SS`/`F` bytes itself. The tool alwa
 back **unchanged** (read‑modify‑write), which is also what keeps a config write from disturbing
 the calibration stored inside it; `settings.py` verifies the *named* fields and reports any
 firmware‑side blob change as an informational note, not a failure. `--snapshot`/`--diff` show
-exactly which bytes moved. (Corollary: don't `--restore` a *stale* snapshot blindly — its blob
-carries the calibration that was current when it was taken.)
+exactly which bytes moved. Because the calibration lives in those bytes, `--restore` **refuses by
+default if the snapshot's calibration differs from the device** (it would otherwise silently
+change your pressure‑sensor calibration); override only deliberately with
+`--allow-calibration-change`.
 
 ## How it was reverse‑engineered
 
