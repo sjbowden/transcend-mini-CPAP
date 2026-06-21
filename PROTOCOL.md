@@ -199,6 +199,18 @@ device's only erase. Verified live (2026-06-20) by a full before/after read:
   *config-modified* state, not compliance state; a compliance reset does **not** clear it
   (presumably only a factory reset would). Calibration offset (`Tb3`) is preserved too.
 
+**Reset taxonomy on this device** (three distinct "resets", from least to most destructive):
+
+| Reset | How | Clears | Keeps |
+|-------|-----|--------|-------|
+| **Button reset** | device buttons | error/alarm conditions only | everything else (config, data, `Tbc`, `F`) |
+| **Reset Compliance** | app / `Taf` | event log, `Tb8`, session histogram | config, calibration, `Tbc` (lifetime), `F` latch |
+| **Factory reset** | Somnetics support only (104378 p.19) | unobserved — presumably config + the `F` latch | — |
+
+The button reset was tested live (2026-06-20): it left the entire config/data baseline byte-for-byte
+identical. There is **no user-accessible factory reset**, so clearing the `F` latch (and reverting
+the prescription to factory defaults) can't be triggered or observed without support.
+
 ### Bug in the official desktop app: it under-reports the APAP minimum
 
 The **Windows desktop app (`Somnetics.TranscendGo.Client` v1.1.2.0) displays a wrong, too-low
