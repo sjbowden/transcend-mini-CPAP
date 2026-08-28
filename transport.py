@@ -34,9 +34,31 @@ BAUD = 38400
 CHAR_GAP_S = 0.012     # gap between echoed command characters
 SETTLE_S = 0.06        # quiet period + input flush before each command
 
+# USB VID:PID of the serial bridge inside the Transcend Micro. Which one you
+# get depends on the unit's hardware revision; both speak the same protocol.
+CPAP_USB_IDS = ((0x0403, 0x6015),   # FTDI FT-X
+                (0x10C4, 0xEA60))   # Silicon Labs CP210x
+
 
 class TransportError(RuntimeError):
     """Transport-level failure: port unavailable, helper missing, timeout."""
+
+
+def find_port():
+    """Device node of the first attached Transcend USB-serial bridge, or None.
+
+    Matches by USB VID:PID, so it returns the right thing on every OS without
+    hard-coding names: macOS (/dev/cu.usbserial-XXXX or /dev/cu.SLAB_USBtoUART),
+    Linux (/dev/ttyUSB0), Windows (COMx). Requires pyserial; returns None if it
+    is not installed or no matching device is attached."""
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        return None
+    for p in list_ports.comports():
+        if p.vid is not None and (p.vid, p.pid) in CPAP_USB_IDS:
+            return p.device
+    return None
 
 
 def is_wsl():
@@ -55,6 +77,16 @@ def make_transport(port, prefer="auto"):
     for tests)."""
     if hasattr(prefer, "command"):
         return prefer
+    if port == "auto":
+        # Resolve the magic port name "auto" to a real device by USB VID:PID.
+        found = find_port()
+        if not found:
+            raise TransportError(
+                "no Transcend USB-serial device found (FTDI 0403:6015 or "
+                "CP210x 10C4:EA60). Plug the CPAP in with a data USB-C cable, "
+                "or pass an explicit --port (macOS: /dev/cu.usbserial-XXXX, "
+                "Windows: COM3). List ports: python3 -m serial.tools.list_ports -v")
+        port = found
     if prefer in (None, "auto"):
         # A COMx name only means something to Windows; from WSL/Linux it must
         # go through powershell.exe. A /dev/... port is always pyserial.

@@ -5,7 +5,9 @@ Writes the exact same dump.txt format (HEADER / DEVICE / ADDR / BLOCK lines),
 so parse.py and sleephq/convert.py consume it unchanged.
 
 Usage:
-    python3 collect.py --port COM3 --out dump.txt
+    python3 collect.py                              # auto-detect the port (any OS)
+    python3 collect.py --port /dev/cu.usbserial-XX  # macOS (explicit)
+    python3 collect.py --port COM3 --out dump.txt   # Windows (explicit)
     python3 collect.py --port /dev/ttyUSB0          # usbipd-attached under WSL
     python3 collect.py --transport powershell       # force the pap.ps1 bridge
 
@@ -72,7 +74,10 @@ def collect(port, out_path, transport="auto", log=print):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", default="COM3")
+    ap.add_argument("--port", default="auto",
+                    help='serial port, or "auto" (default) to find the Transcend '
+                         'USB bridge by VID:PID. macOS: /dev/cu.usbserial-XXXX; '
+                         'Windows: COM3')
     ap.add_argument("--out", default="dump.txt")
     ap.add_argument("--transport", choices=["auto", "pyserial", "powershell"],
                     default="auto")
