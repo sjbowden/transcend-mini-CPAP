@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Thin wrapper so `./transcend ...` reads nicer than `./pipeline.sh ...`.
+# Forwards every argument and env var untouched.
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pipeline.sh" "$@"
