@@ -31,14 +31,19 @@ convert → upload pipeline on every OS. See [`packaging/MACOS.md`](packaging/MA
 for macOS setup, or [`packaging/WINDOWS.md`](packaging/WINDOWS.md) for Windows
 (including the standalone `.exe`).
 
-## Quick start (the recurring routine)
+## Quick start
 
-Once one‑time setup is done (pyserial installed, SleepHQ credentials saved —
-see Requirements and step 4 below), pulling a new batch of nights is one command:
-
+**One-time setup** (skip if you've already done this on this machine):
 ```bash
-# 1. Plug the CPAP into USB.
-# 2. Run:
+brew install python                          # macOS; Linux/Windows: see packaging/*.md
+python3 -m venv .venv && .venv/bin/pip install pyserial
+```
+`transcend`/`pipeline.sh` auto‑detect and prefer `./.venv/bin/python3` if it
+exists, so no `source .venv/bin/activate` is needed — just run them directly.
+Then set up SleepHQ credentials (step 4 below) if you want the upload stage.
+
+**The recurring routine** — plug the CPAP into USB, then:
+```bash
 ./transcend
 ```
 (`./transcend` is a thin wrapper around `pipeline.sh` — same flags, same env
