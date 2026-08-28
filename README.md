@@ -18,12 +18,42 @@ pipeline from the device to a CSV and to a SleepHQ‑importable dataset.
 
 ```
  device (USB/FTDI)        dump.txt            events.csv / sessions.csv      SleepHQ
-   ──collect.ps1──▶  raw event log  ──parse.py──▶  decoded therapy data
+   ──collect.py───▶  raw event log  ──parse.py──▶  decoded therapy data
                                                           │
                                                   convert.py (sleephq/)
                                                           ▼
-                                          ResMed‑format SD tree ──upload──▶ SleepHQ
+                                          ResMed‑format SD tree ──upload.py──▶ SleepHQ
 ```
+
+Runs natively on **macOS, Linux, and Windows** — `collect.py` is pure Python
+(pyserial), auto‑detects the device by USB VID:PID, and drives the same pull →
+convert → upload pipeline on every OS. See [`packaging/MACOS.md`](packaging/MACOS.md)
+for macOS setup, or [`packaging/WINDOWS.md`](packaging/WINDOWS.md) for Windows
+(including the standalone `.exe`).
+
+## Quick start (the recurring routine)
+
+Once one‑time setup is done (pyserial installed, SleepHQ credentials saved —
+see Requirements and step 4 below), pulling a new batch of nights is one command:
+
+```bash
+# 1. Plug the CPAP into USB.
+# 2. Run:
+./pipeline.sh
+```
+
+That pulls every session currently on the device, converts it to a ResMed/SleepHQ
+tree, and uploads it. It always re‑pulls everything the device is holding (not just
+new nights), but that's cheap and safe: SleepHQ dedups by file hash, so re‑uploading
+nights it already has is a no‑op on its side.
+
+```bash
+./pipeline.sh --no-upload    # just pull + convert; inspect sleephq/out/ before sending
+./pipeline.sh --dry-run      # convert, then print what WOULD upload; sends nothing
+```
+
+Everything past this point explains what each stage does individually and how to
+set it up the first time — you don't need to re‑read it for routine use.
 
 ## What you get
 
@@ -44,15 +74,16 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 | File | Purpose |
 |---|---|
 | [`PROTOCOL.md`](PROTOCOL.md) | The reverse‑engineered serial wire protocol (commands, framing, the 5‑byte event format, all 28 event types) |
-| `pipeline.sh` | End‑to‑end orchestrator: pull → convert → upload (with stage‑skip flags) |
-| `app.py` | **Windows GUI** — Pull / Convert / Upload buttons + read‑only settings view (see [`packaging/WINDOWS.md`](packaging/WINDOWS.md)) |
-| `transport.py` | Serial backends: **pyserial** (native Windows / usbipd) or the **powershell.exe bridge** (WSL default), auto‑selected |
-| `collect.py` | Pure‑Python event‑log collector (same `dump.txt` format as `collect.ps1`) |
-| `collect.ps1` | PowerShell collector — current default in `pipeline.sh` until the pyserial path is live‑validated |
+| `pipeline.sh` | End‑to‑end orchestrator: pull → convert → upload (with stage‑skip flags); OS‑agnostic, calls `collect.py` |
+| `app.py` | **Cross‑platform GUI** (macOS/Linux/Windows, plain tkinter) — Pull / Convert / Upload buttons + read‑only settings view, port auto‑prefilled. See [`packaging/MACOS.md`](packaging/MACOS.md) / [`packaging/WINDOWS.md`](packaging/WINDOWS.md) |
+| `transport.py` | Serial backends, auto‑selected: **pyserial** (native macOS/Linux/Windows) or the **powershell.exe bridge** (WSL, no usbipd). `find_port()` locates the device by USB VID:PID on any OS |
+| `collect.py` | Pure‑Python, cross‑platform event‑log collector (same `dump.txt` format as `collect.ps1`); what `pipeline.sh` and `app.py` call |
+| `collect.ps1` | Original PowerShell collector — kept for reference; native Windows/WSL runs now go through `collect.py` |
 | `parse.py` | Decodes the event log → `events.csv`, `sessions.csv`, and a printed summary |
-| `pap.ps1` | PowerShell serial transport, used by `transport.py`'s bridge backend |
+| `pap.ps1` | PowerShell serial transport, used by `transport.py`'s WSL bridge backend |
 | `settings.py` | View and (carefully) edit device settings — EZEX, ramp, pressures |
 | `sleephq/convert.py` | Converts the parsed sessions into a ResMed‑format SD‑card tree SleepHQ can ingest |
+| `sleephq/upload.py` | Uploads that tree to SleepHQ over its REST API (stdlib‑only: OAuth, import creation, file upload, processing) |
 | `sleephq/edf.py` | Minimal EDF/EDF+ reader + ResMed‑flavoured writer (per‑record CRC‑16/CCITT) |
 | `sleephq/templates/` | Bundled header‑only, PHI‑stripped ResMed EDF templates (STR/BRP/PLD) so the converter is self‑contained |
 | `tests/` | Unit tests (decoder round‑trip, multi‑dump merge, converter end‑to‑end) — `python3 -m unittest discover -s tests`; no device needed |
@@ -62,28 +93,36 @@ Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 
 ## Requirements
 
-- A Transcend Micro (or family) CPAP on a USB cable. Depending on hardware revision it enumerates as
-  either an **FTDI** serial port (`VID_0403 PID_6015`) or a **Silicon Labs CP210x**
-  (`VID_10C4 PID_EA60`) — both work; just point `-Port` at whichever COM port appears.
-- **Windows** (the device's COM port), or **WSL** — `collect.ps1` is driven through
-  `powershell.exe`'s `System.IO.Ports`, so no `usbipd` is needed under WSL.
-- Python 3.8+ for `parse.py` / `convert.py` (standard library only).
-  `pyserial` is needed only for the direct-serial transport on native Windows
-  (or a usbipd-attached port under WSL); the WSL powershell-bridge path needs
-  nothing extra.
+- A Transcend Micro (or family) CPAP on a **data‑capable** USB cable. Depending on hardware
+  revision it enumerates as either an **FTDI** serial port (`VID_0403 PID_6015`) or a
+  **Silicon Labs CP210x** (`VID_10C4 PID_EA60`) — both work, and `--port auto` finds
+  either one for you.
+  - On a USB‑C Mac, if the device enumerates and then immediately drops, that's a
+    Type‑C power‑negotiation quirk on some ports, not a bad cable — a USB‑C‑to‑USB‑A
+    adapter fixes it (see [`packaging/MACOS.md`](packaging/MACOS.md)).
+- **macOS or Linux** (native, via pyserial) — see [`packaging/MACOS.md`](packaging/MACOS.md).
+- **Windows** (the device's COM port, native pyserial), or **WSL** — `collect.py`'s
+  powershell.exe bridge needs no `usbipd` under WSL.
+- Python 3.8+ for `parse.py` / `convert.py` / `sleephq/upload.py` (standard library only).
+  `pyserial` is needed only for the direct‑serial transport (native macOS/Linux/Windows,
+  or a usbipd‑attached port under WSL); the WSL powershell‑bridge path needs nothing extra.
 
 ## Usage
 
-### Windows app
-```powershell
-pip install pyserial
-python app.py        # GUI: Pull / Convert / Upload buttons + settings view
-```
-Pure Python end‑to‑end on native Windows (no PowerShell helpers, no WSL).
-[`packaging/WINDOWS.md`](packaging/WINDOWS.md) covers building a standalone
-`TranscendSync.exe` with PyInstaller. The CLI equivalents:
+### macOS / Linux / Windows app
 ```bash
-python collect.py --port COM3 --out dump.txt    # pure-Python pull (pyserial)
+pip install pyserial
+python3 app.py        # GUI: Pull / Convert / Upload buttons + settings view
+```
+Plain tkinter (`python-tk` on Homebrew, ships by default on python.org/Windows
+Python), so the same GUI runs everywhere; the port field prefills with the
+detected device (or `auto`). [`packaging/MACOS.md`](packaging/MACOS.md) covers
+macOS setup; [`packaging/WINDOWS.md`](packaging/WINDOWS.md) covers Windows,
+including building a standalone `TranscendSync.exe` with PyInstaller. The CLI
+equivalent, on any OS:
+```bash
+python3 collect.py --port auto --out dump.txt    # auto-detects the device by USB VID:PID
+python3 collect.py --port COM3 --out dump.txt    # ...or name the port explicitly
 ```
 
 ### All in one: `pipeline.sh`
@@ -93,22 +132,23 @@ The whole flow — pull from the device → convert → upload to SleepHQ — is
 ./pipeline.sh --no-upload     # pull + convert only (inspect sleephq/out/ first)
 ./pipeline.sh --no-pull       # reuse the existing dump.txt (skip the device)
 ./pipeline.sh --dry-run       # convert, then show what WOULD upload (sends nothing)
-PORT=COM4 ./pipeline.sh       # device on a different COM port
+PORT=/dev/cu.usbserial-XXXX ./pipeline.sh   # explicit port (default: auto-detect)
 ```
-It calls the SleepHQ uploader at `~/cpap/sleephq_upload.py` (override with
-`SLEEPHQ_UPLOADER=…`), which needs credentials saved at `~/.sleephq_credentials`. Each run
+It calls the bundled `sleephq/upload.py` (override with `SLEEPHQ_UPLOADER=…`), which
+needs credentials saved at `~/.sleephq_credentials` (see step 4 below). Each run
 uploads *all* nights on the device as a new import; SleepHQ merges by date on its side. The
 individual stages are below.
 
 ### 1. Download the event log
-```powershell
-# Windows PowerShell (device on COM3 by default)
-powershell -ExecutionPolicy Bypass -File collect.ps1 -Port COM3 -OutFile dump.txt
+```bash
+python3 collect.py --port auto --out dump.txt
 ```
-The device is a request/response protocol at 38400 8N1; `collect.ps1` reads the
-event‑log header, walks the ring buffer, and writes the raw blocks to `dump.txt`.
-The download is non‑destructive, but the device only holds **3–6 months** of data
-(vendor‑stated) — pull at least every ~3 months or the oldest nights are lost.
+The device is a request/response protocol at 38400 8N1; `collect.py` reads the
+event‑log header, walks the ring buffer, and writes the raw blocks to `dump.txt` —
+the same format the original `collect.ps1` produces, if you'd rather run that
+under Windows PowerShell. The download is non‑destructive, but the device only
+holds **3–6 months** of data (vendor‑stated) — pull at least every ~3 months or
+the oldest nights are lost.
 
 ### 2. Decode to CSV
 ```bash
@@ -138,14 +178,25 @@ appears as a separate machine (rename it / set your day‑split in the SleepHQ U
 > therapy records). No real ResMed machine or SD card is needed to run the converter.
 
 ### 4. Upload to SleepHQ
-Upload the generated tree via the SleepHQ API (OAuth2 password grant → create an
-import → `POST` each file → `process_files`). Two gotchas learned the hard way:
+```bash
+# One-time: create an API client in SleepHQ's Account Settings, then save
+# ~/.sleephq_credentials (chmod 600):
+#   SLEEPHQ_CLIENT_ID=...
+#   SLEEPHQ_CLIENT_SECRET=...
+#   # SLEEPHQ_TEAM_ID=...   (optional; default team is used if omitted)
 
-- **Send each file as bytes, not a streamed file handle** — a handle makes `requests`
-  use chunked transfer‑encoding, which SleepHQ rejects as *"corrupted during upload."*
-- `content_hash` must be `md5(file_bytes + filename)`, and a ResMed import needs the
-  **full per‑session file set** (`BRP/PLD/EVE/CSL`), not just `STR.edf` — otherwise it
-  fails with *"some files were missing."*
+python3 sleephq/upload.py --data-dir sleephq/out --all --dry-run   # preview, sends nothing
+python3 sleephq/upload.py --data-dir sleephq/out --all \
+    --import-name "Transcend (all, $(date +%Y-%m-%d))"
+```
+`sleephq/upload.py` is stdlib‑only (no `requests`) and drives the SleepHQ API directly:
+OAuth2 password grant → create an import → `POST` each file → `process_files`. It sends
+each file as bytes (not a streamed handle, which makes some HTTP clients use chunked
+transfer‑encoding that SleepHQ rejects as *"corrupted during upload"*), hashes each file
+as `content_hash = md5(file_bytes + filename)`, and uploads the **full per‑session file
+set** (`BRP/PLD/EVE/CSL`), not just `STR.edf` — a partial set fails as *"some files were
+missing."* It also sends an explicit `User-Agent`; SleepHQ's Cloudflare front end blocks
+the default `urllib`/`Python-urllib` signature outright.
 
 ## Settings (read & edit)
 
