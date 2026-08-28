@@ -11,20 +11,21 @@
 #   ./pipeline.sh --dry-run       # convert, then show what WOULD upload (sends nothing)
 #   PORT=/dev/cu.usbserial-XX ./pipeline.sh   # explicit port (default: auto-detect)
 #   MASK=3 ./pipeline.sh          # ResMed mask-type code for SleepHQ's settings panel
-#   SLEEPHQ_UPLOADER=/path/to/sleephq_upload.py ./pipeline.sh
+#   SLEEPHQ_UPLOADER=/path/to/upload.py ./pipeline.sh
 #
 # Requires: Python 3 with pyserial (macOS/Linux) or Windows/WSL, the device on
-# USB, and the SleepHQ uploader (a separate tool) with credentials at
-# ~/.sleephq_credentials. The pull stage goes through collect.py, which picks the
-# serial backend itself (pyserial on macOS/Linux, the powershell bridge for a
-# COM port under WSL) — so this script is the same on every OS.
+# USB, and SleepHQ API credentials at ~/.sleephq_credentials (see
+# sleephq/upload.py's docstring for how to create one). The pull stage goes
+# through collect.py, which picks the serial backend itself (pyserial on
+# macOS/Linux, the powershell bridge for a COM port under WSL) — so this
+# script is the same on every OS.
 set -euo pipefail
 
 PORT="${PORT:-auto}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DUMP="$HERE/dump.txt"
 OUT="$HERE/sleephq/out"
-UPLOADER="${SLEEPHQ_UPLOADER:-$HOME/cpap/sleephq_upload.py}"
+UPLOADER="${SLEEPHQ_UPLOADER:-$HERE/sleephq/upload.py}"
 PYTHON="${PYTHON:-python3}"
 
 pull=1 convert=1 upload=1 dry=""
