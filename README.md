@@ -39,8 +39,10 @@ see Requirements and step 4 below), pulling a new batch of nights is one command
 ```bash
 # 1. Plug the CPAP into USB.
 # 2. Run:
-./pipeline.sh
+./transcend
 ```
+(`./transcend` is a thin wrapper around `pipeline.sh` — same flags, same env
+vars, just a nicer name to type.)
 
 That pulls every session currently on the device, converts it to a ResMed/SleepHQ
 tree, and uploads it. It always re‑pulls everything the device is holding (not just
