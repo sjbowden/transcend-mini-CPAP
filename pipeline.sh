@@ -12,13 +12,15 @@
 #   PORT=/dev/cu.usbserial-XX ./pipeline.sh   # explicit port (default: auto-detect)
 #   MASK=3 ./pipeline.sh          # ResMed mask-type code for SleepHQ's settings panel
 #   SLEEPHQ_UPLOADER=/path/to/upload.py ./pipeline.sh
+#   PYTHON=/path/to/python3 ./pipeline.sh   # override interpreter (see below)
 #
 # Requires: Python 3 with pyserial (macOS/Linux) or Windows/WSL, the device on
 # USB, and SleepHQ API credentials at ~/.sleephq_credentials (see
 # sleephq/upload.py's docstring for how to create one). The pull stage goes
 # through collect.py, which picks the serial backend itself (pyserial on
 # macOS/Linux, the powershell bridge for a COM port under WSL) — so this
-# script is the same on every OS.
+# script is the same on every OS. Uses ./.venv/bin/python3 automatically if
+# present (that's normally where pyserial is installed); override with PYTHON=.
 set -euo pipefail
 
 PORT="${PORT:-auto}"
@@ -26,7 +28,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DUMP="$HERE/dump.txt"
 OUT="$HERE/sleephq/out"
 UPLOADER="${SLEEPHQ_UPLOADER:-$HERE/sleephq/upload.py}"
-PYTHON="${PYTHON:-python3}"
+# Prefer a venv sitting next to this script (where pyserial actually lives)
+# over whatever "python3" happens to resolve to on PATH — a bare `python3`
+# with no pyserial makes port "auto" fail with the same error as "no device
+# found", which is a confusing way to discover you forgot to activate .venv.
+if [ -z "${PYTHON:-}" ] && [ -x "$HERE/.venv/bin/python3" ]; then
+  PYTHON="$HERE/.venv/bin/python3"
+else
+  PYTHON="${PYTHON:-python3}"
+fi
 
 pull=1 convert=1 upload=1 dry=""
 for a in "$@"; do
