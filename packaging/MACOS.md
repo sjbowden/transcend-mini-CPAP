@@ -65,12 +65,26 @@ pressure, leak) — the natural thing to feed into your own dashboard.
 
 ```sh
 ./pipeline.sh --no-upload        # pull + convert to a ResMed/SleepHQ SD tree
-./pipeline.sh                    # + upload (needs the separate SleepHQ uploader)
+./pipeline.sh                    # + upload to SleepHQ
 PORT=/dev/cu.usbserial-XXXX ./pipeline.sh --no-upload   # explicit port
 ```
 
 `pipeline.sh` is now OS-agnostic — the pull stage calls `collect.py`, which
 picks the serial backend itself.
+
+Uploading needs a SleepHQ API client. In SleepHQ, go to Account Settings and
+create one to get a Client ID and Client Secret, then create
+`~/.sleephq_credentials` (`chmod 600`):
+
+```
+SLEEPHQ_CLIENT_ID=...
+SLEEPHQ_CLIENT_SECRET=...
+# SLEEPHQ_TEAM_ID=...   (optional; default team is used if omitted)
+```
+
+`sleephq/upload.py` (pure stdlib, no extra dependencies) reads those and
+handles auth, import creation, file upload, and processing — see its
+docstring for the full API flow.
 
 ## 6. GUI (optional)
 
@@ -93,3 +107,20 @@ prefills with the detected device (or `auto`).
   is the call-out (non-blocking) node you want for this.
 - **Permission denied opening the port** — rare on macOS, but reconnect the
   cable or check no other app (e.g. Transcend's own software) holds the port.
+- **Device enumerates then disappears after ~1 second (`cableChangeOccurred:
+  powering off` in the kernel log)** — this is a USB-C Type-C power-delivery
+  negotiation drop, not a driver or cable problem: the FTDI/CP210x chip comes
+  up fine, but the CC-line PD negotiation on some Mac USB-C ports tears the
+  device back down almost immediately. A plain **USB-C-to-USB-A adapter**
+  sidesteps Type-C PD negotiation entirely and gives a stable connection. To
+  confirm this is what's happening, watch the kernel log live while you plug
+  in: `/usr/bin/log stream --predicate 'subsystem == "com.apple.iokit.IOUSBHostFamily" OR eventMessage CONTAINS "cableChangeOccurred"'`
+  (see the two gotchas below for why `system_profiler` and plain `log` can
+  mislead you here).
+- **On macOS 26 ("Tahoe"), `system_profiler SPUSBDataType` returns nothing**
+  — the data type was renamed to `SPUSBHostDataType`. Confirm with
+  `system_profiler -listDataTypes | grep -i usb`, then use
+  `system_profiler SPUSBHostDataType`.
+- **`log show`/`log stream` fails with `(eval):log:1: too many arguments`** —
+  zsh has a builtin `log` that shadows `/usr/bin/log`. Call the full path,
+  e.g. `/usr/bin/log show --predicate '...' --last 2m`.
