@@ -435,7 +435,10 @@ def diff_blob(path, args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", default="COM3")
+    ap.add_argument("--port", default="auto",
+                    help='serial port, or "auto" (default) to find the Transcend '
+                         'USB bridge by VID:PID. macOS: /dev/cu.usbserial-XXXX; '
+                         'Windows: COM3')
     ap.add_argument("--transport", choices=["auto", "pyserial", "powershell"], default="auto",
                     help="serial backend (auto: COMx under WSL -> powershell bridge, else pyserial)")
     ap.add_argument("--show", action="store_true", help="print current settings (read-only)")

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Transcend Sync — minimal Windows GUI for the Transcend Micro toolchain.
+"""Transcend Sync — minimal cross-platform GUI for the Transcend Micro toolchain.
+
+Runs on macOS, Linux and Windows: it's plain tkinter (ships with python.org
+Python and Homebrew's python-tk) and drives the same pure-Python CLI stages.
 
 Buttons map 1:1 onto the CLI stages (see README.md):
     Pull        collect.py        device -> dump.txt
@@ -31,6 +34,7 @@ sys.path.insert(0, os.path.join(HERE, "sleephq"))
 import collect as tcollect       # noqa: E402
 import settings as tsettings     # noqa: E402
 import convert as tconvert       # noqa: E402
+import transport as ttransport   # noqa: E402
 from transport import TransportError  # noqa: E402
 
 DUMP = os.path.join(HERE, "dump.txt")
@@ -59,8 +63,10 @@ class App:
         top = ttk.Frame(root, padding=8)
         top.pack(fill="x")
         ttk.Label(top, text="Port:").pack(side="left")
-        self.port = tk.StringVar(value="COM3")
-        ttk.Entry(top, textvariable=self.port, width=12).pack(side="left", padx=(4, 16))
+        # "auto" resolves to the attached CPAP by USB VID:PID (see transport.py);
+        # if exactly one is present we can prefill its real device node.
+        self.port = tk.StringVar(value=ttransport.find_port() or "auto")
+        ttk.Entry(top, textvariable=self.port, width=24).pack(side="left", padx=(4, 16))
 
         self.buttons = []
         for label, fn in [("Pull", self.do_pull), ("Convert", self.do_convert),

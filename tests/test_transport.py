@@ -140,6 +140,45 @@ class TestBackendSelection(unittest.TestCase):
         self.assertIs(transport.make_transport("COM3", t), t)
 
 
+class TestAutoPort(unittest.TestCase):
+    """`--port auto` resolves to a real device by USB VID:PID, then falls back
+    to the normal backend selection on the resolved node."""
+
+    def _patch_find(self, value):
+        orig = transport.find_port
+        transport.find_port = lambda: value
+        self.addCleanup(lambda: setattr(transport, "find_port", orig))
+
+    def test_auto_resolves_to_detected_dev_node(self):
+        self._patch_find("/dev/cu.usbserial-XYZ")
+        t = transport.make_transport("auto")
+        self.assertIsInstance(t, transport.PySerialTransport)
+        self.assertEqual(t.port_name, "/dev/cu.usbserial-XYZ")
+
+    def test_auto_with_nothing_attached_raises_helpfully(self):
+        self._patch_find(None)
+        with self.assertRaises(transport.TransportError) as cm:
+            transport.make_transport("auto")
+        self.assertIn("no Transcend USB-serial device", str(cm.exception))
+
+    def test_find_port_matches_vid_pid(self):
+        # find_port() reads serial.tools.list_ports; fake it to prove the match.
+        import types
+        fake = types.SimpleNamespace(
+            comports=lambda: [
+                types.SimpleNamespace(vid=0x1234, pid=0x0001, device="/dev/other"),
+                types.SimpleNamespace(vid=0x10C4, pid=0xEA60, device="/dev/cu.SLAB_USBtoUART"),
+            ])
+        sys.modules["serial"] = types.ModuleType("serial")
+        sys.modules["serial.tools"] = types.ModuleType("serial.tools")
+        sys.modules["serial.tools.list_ports"] = fake
+        try:
+            self.assertEqual(transport.find_port(), "/dev/cu.SLAB_USBtoUART")
+        finally:
+            for m in ("serial.tools.list_ports", "serial.tools", "serial"):
+                sys.modules.pop(m, None)
+
+
 class FakeTransport:
     def __init__(self, mapping):
         self.mapping = mapping

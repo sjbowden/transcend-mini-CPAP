@@ -9,19 +9,23 @@
 #   ./pipeline.sh --no-pull       # reuse the existing dump.txt (skip the device)
 #   ./pipeline.sh --no-convert    # skip the convert stage (re-upload existing out/)
 #   ./pipeline.sh --dry-run       # convert, then show what WOULD upload (sends nothing)
-#   PORT=COM4 ./pipeline.sh       # device on a different COM port (default COM3)
+#   PORT=/dev/cu.usbserial-XX ./pipeline.sh   # explicit port (default: auto-detect)
 #   MASK=3 ./pipeline.sh          # ResMed mask-type code for SleepHQ's settings panel
 #   SLEEPHQ_UPLOADER=/path/to/sleephq_upload.py ./pipeline.sh
 #
-# Requires: Windows/WSL with the device on a COM port (for the pull stage), Python 3,
-# and the SleepHQ uploader (a separate tool) with credentials at ~/.sleephq_credentials.
+# Requires: Python 3 with pyserial (macOS/Linux) or Windows/WSL, the device on
+# USB, and the SleepHQ uploader (a separate tool) with credentials at
+# ~/.sleephq_credentials. The pull stage goes through collect.py, which picks the
+# serial backend itself (pyserial on macOS/Linux, the powershell bridge for a
+# COM port under WSL) — so this script is the same on every OS.
 set -euo pipefail
 
-PORT="${PORT:-COM3}"
+PORT="${PORT:-auto}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DUMP="$HERE/dump.txt"
 OUT="$HERE/sleephq/out"
 UPLOADER="${SLEEPHQ_UPLOADER:-$HOME/cpap/sleephq_upload.py}"
+PYTHON="${PYTHON:-python3}"
 
 pull=1 convert=1 upload=1 dry=""
 for a in "$@"; do
@@ -30,25 +34,22 @@ for a in "$@"; do
     --no-convert) convert=0 ;;
     --no-upload)  upload=0 ;;
     --dry-run)    dry="--dry-run" ;;
-    -h|--help)    sed -n '2,16p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "unknown arg: $a (try --help)" >&2; exit 2 ;;
   esac
 done
 
-win() { wslpath -w "$1"; }   # WSL path -> Windows path, for powershell.exe
-
 if [ "$pull" = 1 ]; then
   echo "==> [1/3] Pulling event log from $PORT ..."
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(win "$HERE/collect.ps1")" \
-    -Port "$PORT" -OutFile "$(win "$DUMP")"
-  [ -s "$DUMP" ] || { echo "  ERROR: $DUMP is empty — is the device connected on $PORT?" >&2; exit 1; }
+  "$PYTHON" "$HERE/collect.py" --port "$PORT" --out "$DUMP"
+  [ -s "$DUMP" ] || { echo "  ERROR: $DUMP is empty — is the device connected? ($PORT)" >&2; exit 1; }
 else
   echo "==> [1/3] Pull skipped (using existing $DUMP)."
 fi
 
 if [ "$convert" = 1 ]; then
   echo "==> [2/3] Converting -> $OUT ..."
-  python3 "$HERE/sleephq/convert.py" "$DUMP" --out "$OUT" ${MASK:+--mask "$MASK"}
+  "$PYTHON" "$HERE/sleephq/convert.py" "$DUMP" --out "$OUT" ${MASK:+--mask "$MASK"}
 else
   echo "==> [2/3] Convert skipped."
 fi
@@ -56,7 +57,7 @@ fi
 if [ "$upload" = 1 ]; then
   echo "==> [3/3] Uploading to SleepHQ ..."
   [ -f "$UPLOADER" ] || { echo "  ERROR: uploader not found at $UPLOADER (set SLEEPHQ_UPLOADER)" >&2; exit 1; }
-  python3 "$UPLOADER" --data-dir "$OUT" --all \
+  "$PYTHON" "$UPLOADER" --data-dir "$OUT" --all \
     --import-name "Transcend (all, $(date +%Y-%m-%d))" $dry
 else
   echo "==> [3/3] Upload skipped."
