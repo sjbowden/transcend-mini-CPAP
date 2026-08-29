@@ -194,6 +194,29 @@ class TestAutoPort(unittest.TestCase):
         self.assertIsInstance(t, transport.PowershellTransport)
         self.assertEqual(t.port_name, transport.WSL_DEFAULT_PORT)
 
+    def test_explicit_powershell_bridge_ignores_a_found_dev_node(self):
+        # Regression: a usbipd-attached device under WSL made find_port()
+        # return /dev/ttyUSB0, which was then handed to pap.ps1 -Port. The
+        # bridge cannot drive a Linux device node -- it must stay on COMx.
+        self._patch_find("/dev/ttyUSB0")
+        self._patch_wsl(True)
+        t = transport.make_transport("auto", "powershell")
+        self.assertIsInstance(t, transport.PowershellTransport)
+        self.assertEqual(t.port_name, transport.WSL_DEFAULT_PORT)
+
+    def test_missing_pyserial_is_not_reported_as_a_missing_device(self):
+        # "no driver" and "no device" need different fixes, so the message
+        # must name pyserial rather than telling you to check your cable.
+        import types
+        for m in ("serial.tools.list_ports", "serial.tools", "serial"):
+            sys.modules[m] = None       # force ImportError on import
+        self.addCleanup(lambda: [sys.modules.pop(m, None) for m in
+                                 ("serial.tools.list_ports", "serial.tools", "serial")])
+        with self.assertRaises(transport.TransportError) as cm:
+            transport.find_port()
+        self.assertIn("pyserial", str(cm.exception))
+        self.assertNotIn("no Transcend USB-serial device", str(cm.exception))
+
     def test_find_port_matches_vid_pid(self):
         # find_port() reads serial.tools.list_ports; fake it to prove the match.
         import types

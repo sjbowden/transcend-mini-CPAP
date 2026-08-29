@@ -93,6 +93,11 @@ def api_request(base_url, method, path, token=None, data=None, headers=None,
             return resp.status, resp.read()
     except urlerror.HTTPError as e:
         return e.code, e.read()
+    except (urlerror.URLError, OSError) as e:
+        # DNS failure, refused connection, TLS error, socket timeout. Without
+        # this a mid-upload network drop exits with a traceback instead of the
+        # "error: ..." the __main__ handler prints for every other failure.
+        raise SleepHQError(f"{method} {path} failed (network): {e}")
 
 
 def get_access_token(base_url, client_id, client_secret):
@@ -107,7 +112,10 @@ def get_access_token(base_url, client_id, client_secret):
         content_type="application/x-www-form-urlencoded")
     if status != 200:
         raise SleepHQError(f"OAuth failed (HTTP {status}): {body_bytes[:500]!r}")
-    return json.loads(body_bytes)["access_token"]
+    try:
+        return json.loads(body_bytes)["access_token"]
+    except (ValueError, KeyError, TypeError):
+        raise SleepHQError(f"no access_token in OAuth response: {body_bytes[:500]!r}")
 
 
 def get_team_id(base_url, token, team_id_override):
@@ -116,8 +124,12 @@ def get_team_id(base_url, token, team_id_override):
     status, body_bytes = api_request(base_url, "GET", f"{API_VERSION}/me", token=token)
     if status != 200:
         raise SleepHQError(f"GET /me failed (HTTP {status}): {body_bytes[:500]!r}")
-    data = json.loads(body_bytes).get("data", {})
-    team_id = data.get("current_team_id") or data.get("attributes", {}).get("current_team_id")
+    try:
+        data = json.loads(body_bytes).get("data", {})
+        team_id = (data.get("current_team_id")
+                   or data.get("attributes", {}).get("current_team_id"))
+    except (ValueError, AttributeError):
+        team_id = None      # non-JSON, or "data" was a list rather than an object
     if not team_id:
         raise SleepHQError(f"could not find current_team_id in /me response: {body_bytes[:500]!r}")
     return str(team_id)
@@ -128,7 +140,10 @@ def create_import(base_url, token, team_id):
         base_url, "POST", f"{API_VERSION}/teams/{team_id}/imports", token=token)
     if status not in (200, 201):
         raise SleepHQError(f"create import failed (HTTP {status}): {body_bytes[:500]!r}")
-    return str(json.loads(body_bytes)["data"]["id"])
+    try:
+        return str(json.loads(body_bytes)["data"]["id"])
+    except (ValueError, KeyError, TypeError):
+        raise SleepHQError(f"no import id in response: {body_bytes[:500]!r}")
 
 
 def content_hash(abs_path, file_name):

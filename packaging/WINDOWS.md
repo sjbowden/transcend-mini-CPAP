@@ -36,9 +36,9 @@ Notes:
   positives. Fine for personal use; distribution would need a code-signing
   certificate.
 - **Upload from the frozen exe** shells out to `python` on PATH to run the
-  external SleepHQ uploader (`SLEEPHQ_UPLOADER`, default
-  `~/cpap/sleephq_upload.py`) — the exe itself is not a Python interpreter.
-  If no Python is on PATH, run the upload stage separately.
+  bundled SleepHQ uploader (`SLEEPHQ_UPLOADER`, default `sleephq/upload.py`
+  next to the app) — the exe itself is not a Python interpreter. If no Python
+  is on PATH, run the upload stage separately.
 
 ## 3. From WSL (development convenience)
 
@@ -50,9 +50,11 @@ fully usable from WSL too — just slower per command than native pyserial.
 
 The pyserial backend mirrors `pap.ps1`/`collect.ps1` timing (60 ms settle,
 12 ms char gap, two-CR framing, nulls discarded, RTS/DTR held low) and is
-covered by unit tests against a fake serial port — but it has **not yet been
-validated against the real device**. Before trusting it: run
+covered by unit tests against a fake serial port. It has been exercised against
+a real device on **macOS**, and `pipeline.sh` now calls `collect.py` on every OS
+— but the **Windows** path has not been diffed against `collect.ps1` on real
+hardware. Before trusting it here: run
 `python collect.py --port COM3 --out dump-pyserial.txt` on Windows and diff
 against a `collect.ps1` dump taken back-to-back (event records should be
-identical; the queue may have gained a few events between pulls). Until then,
-`pipeline.sh` keeps using `collect.ps1`.
+identical; the queue may have gained a few events between pulls). `collect.ps1`
+remains in the tree as the reference implementation until that diff is run.

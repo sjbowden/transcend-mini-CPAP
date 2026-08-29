@@ -2,13 +2,16 @@
 
 ## Windows app
 
-- ⚠️ **Live-validate the pyserial transport** (`transport.py` / `collect.py`). It mirrors
-  pap.ps1/collect.ps1 timing exactly and is unit-tested against a fake serial port, but has
-  not yet touched the real device. On Windows:
-  `python collect.py --port COM3 --out dump-pyserial.txt`, then diff the BLOCK records
-  against a back-to-back `collect.ps1` dump (allow a few new tail events between pulls).
-  Also exercise `settings.py --show --transport pyserial`. **Once validated:** switch
-  `pipeline.sh` to `collect.py` and demote the .ps1 scripts to fallbacks.
+- ⚠️ **Live-validate the pyserial transport on Windows** (`transport.py` / `collect.py`).
+  It mirrors pap.ps1/collect.ps1 timing exactly and is unit-tested against a fake serial
+  port. It has since been exercised against real hardware on **macOS** (see the upstream
+  macOS work merged in `macos-support` — the USB-C power-negotiation and driver findings
+  in `packaging/MACOS.md` could only come from a live device), and `pipeline.sh` now calls
+  `collect.py` on every OS. What is still **not** done is the back-to-back equivalence
+  check on Windows: `python collect.py --port COM3 --out dump-pyserial.txt`, then diff the
+  BLOCK records against a `collect.ps1` dump taken immediately after (allow a few new tail
+  events between pulls). Also exercise `settings.py --show --transport pyserial`. Until
+  that diff is run, `collect.ps1` stays in the tree as the reference implementation.
 - ⬜ **Build + smoke-test the .exe** per packaging/WINDOWS.md (needs Windows Python:
   pyinstaller is not a cross-compiler). Check the bundled templates resolve (one Convert
   run) and note the SmartScreen first-run warning.
