@@ -46,6 +46,7 @@ def collect(port, out_path, transport="auto", log=print):
 
         next_start = address + 50
         block = 0
+        short = None            # set if a response came back truncated
         while True:
             resp = t.command("Ta9%04X%04X" % (next_start, READ_SIZE), timeout=12)
             if len(resp) < 3:
@@ -53,21 +54,43 @@ def collect(port, out_path, transport="auto", log=print):
                 break
             comp = resp[3:]                       # strip Ra9
             lines.append(f"BLOCK {next_start} {comp}")
+            records = len(comp) // 10             # 5-byte records, 10 hex chars each
             valid = sum(1 for i in range(0, len(comp) - 9, 10)
                         if comp[i:i + 10].lower() != "f" * 10)
             block += 1
-            log(f"block {block} @{next_start}: got {len(comp) // 10} records, "
-                f"{valid} valid")
-            if valid == RECORDS_PER_FULL_BLOCK:
-                next_start += READ_SIZE
-            else:
+            log(f"block {block} @{next_start}: got {records} records, {valid} valid")
+
+            # Two very different things used to end this walk identically and
+            # silently. A FULL response padded with ff is the real end of the
+            # data. A SHORT response means the transport lost bytes -- there is
+            # no parity or checksum on this link (PROTOCOL.md), so a timing slip
+            # is otherwise undetectable, and stopping here would write a
+            # perfectly healthy-looking dump that is simply missing nights.
+            # The device's ring buffer overwrites oldest-first, so those nights
+            # are gone for good once they age out. Fail loudly instead.
+            if records < RECORDS_PER_FULL_BLOCK:
+                short = (block, next_start, records)
+                lines.append(f"SHORTBLOCK Ta9@{next_start} "
+                             f"got {records} of {RECORDS_PER_FULL_BLOCK} records")
                 break
+            if valid < RECORDS_PER_FULL_BLOCK:
+                break                             # reached the unwritten region
+            next_start += READ_SIZE
             if block > MAX_BLOCKS:
                 lines.append("ABORT too many blocks")
                 break
 
     with open(out_path, "w") as f:
         f.write("\n".join(lines) + "\n")
+
+    if short:
+        block, addr, records = short
+        raise TransportError(
+            f"truncated response on block {block} @{addr}: got {records} of "
+            f"{RECORDS_PER_FULL_BLOCK} records. This is a transport/timing "
+            f"fault, not the end of the data — the pull is INCOMPLETE and "
+            f"{out_path} is missing nights. Retry; if it repeats, use "
+            f"--transport powershell (the reference path) and compare.")
     log(f"Wrote {len(lines)} lines to {out_path}")
     return block
 
