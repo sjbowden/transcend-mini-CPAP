@@ -149,6 +149,12 @@ class TestAutoPort(unittest.TestCase):
         transport.find_port = lambda: value
         self.addCleanup(lambda: setattr(transport, "find_port", orig))
 
+    def _patch_wsl(self, value):
+        # These tests must not depend on where they happen to run.
+        orig = transport.is_wsl
+        transport.is_wsl = lambda: value
+        self.addCleanup(lambda: setattr(transport, "is_wsl", orig))
+
     def test_auto_resolves_to_detected_dev_node(self):
         self._patch_find("/dev/cu.usbserial-XYZ")
         t = transport.make_transport("auto")
@@ -157,9 +163,36 @@ class TestAutoPort(unittest.TestCase):
 
     def test_auto_with_nothing_attached_raises_helpfully(self):
         self._patch_find(None)
+        self._patch_wsl(False)
         with self.assertRaises(transport.TransportError) as cm:
             transport.make_transport("auto")
         self.assertIn("no Transcend USB-serial device", str(cm.exception))
+
+    def test_auto_under_wsl_falls_back_to_the_powershell_bridge(self):
+        # Under WSL the device is on the Windows side, so find_port() is
+        # structurally blind to it -- "auto" must still reach it, not fail.
+        self._patch_find(None)
+        self._patch_wsl(True)
+        t = transport.make_transport("auto")
+        self.assertIsInstance(t, transport.PowershellTransport)
+        self.assertEqual(t.port_name, transport.WSL_DEFAULT_PORT)
+
+    def test_auto_prefers_a_real_device_over_the_wsl_fallback(self):
+        # A usbipd-attached port under WSL is visible by VID:PID; take it.
+        self._patch_find("/dev/ttyUSB0")
+        self._patch_wsl(True)
+        t = transport.make_transport("auto")
+        self.assertIsInstance(t, transport.PySerialTransport)
+        self.assertEqual(t.port_name, "/dev/ttyUSB0")
+
+    def test_explicit_powershell_bridge_survives_auto(self):
+        # The bridge can only ever drive a COM port, so asking for it by name
+        # must not be defeated by a VID:PID scan finding nothing.
+        self._patch_find(None)
+        self._patch_wsl(False)
+        t = transport.make_transport("auto", "powershell")
+        self.assertIsInstance(t, transport.PowershellTransport)
+        self.assertEqual(t.port_name, transport.WSL_DEFAULT_PORT)
 
     def test_find_port_matches_vid_pid(self):
         # find_port() reads serial.tools.list_ports; fake it to prove the match.

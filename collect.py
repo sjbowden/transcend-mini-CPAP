@@ -9,6 +9,7 @@ Usage:
     python3 collect.py --port /dev/cu.usbserial-XX  # macOS (explicit)
     python3 collect.py --port COM3 --out dump.txt   # Windows (explicit)
     python3 collect.py --port /dev/ttyUSB0          # usbipd-attached under WSL
+    python3 collect.py                              # WSL: "auto" -> powershell bridge, COM3
     python3 collect.py --transport powershell       # force the pap.ps1 bridge
 
 The whole download runs over ONE open port session (like the official client
@@ -37,7 +38,7 @@ def collect(port, out_path, transport="auto", log=print):
         if len(addr_resp) < 7 or not addr_resp.startswith("Ra8"):
             raise TransportError(
                 f"No/short response to Ta8 (got {addr_resp!r}) — is the device "
-                f"connected on {port} and awake?")
+                f"connected on {getattr(t, 'port_name', port)} and awake?")
         address = int(addr_resp[3:], 16)
 
         # Prime read of the 50-byte header region (mirrors the official client)
@@ -77,7 +78,9 @@ def main(argv=None):
     ap.add_argument("--port", default="auto",
                     help='serial port, or "auto" (default) to find the Transcend '
                          'USB bridge by VID:PID. macOS: /dev/cu.usbserial-XXXX; '
-                         'Windows: COM3')
+                         'Windows: COM3. Under WSL the device is on the Windows '
+                         'side and invisible to a Linux scan, so "auto" falls '
+                         'back to the powershell bridge on COM3.')
     ap.add_argument("--out", default="dump.txt")
     ap.add_argument("--transport", choices=["auto", "pyserial", "powershell"],
                     default="auto")

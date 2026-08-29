@@ -89,6 +89,9 @@ def pap(commands, port, required=True):
         try:
             with make_transport(port, TRANSPORT) as t:
                 resp = t.command(c)
+                # Report the port we actually opened, not the literal "auto".
+                # Injected test doubles duck-type through without a port_name.
+                opened = getattr(t, "port_name", port)
         except TransportError as e:
             if required:
                 sys.exit(f"Transport error: {c!r}: {e}")
@@ -96,7 +99,7 @@ def pap(commands, port, required=True):
             continue
         if not resp:
             if required:
-                sys.exit(f"Transport error: no response to {c!r} on {port}.")
+                sys.exit(f"Transport error: no response to {c!r} on {opened}.")
             responses.append("")
             continue
         responses.append(resp)
@@ -438,7 +441,9 @@ def main():
     ap.add_argument("--port", default="auto",
                     help='serial port, or "auto" (default) to find the Transcend '
                          'USB bridge by VID:PID. macOS: /dev/cu.usbserial-XXXX; '
-                         'Windows: COM3')
+                         'Windows: COM3. Under WSL the device is on the Windows '
+                         'side and invisible to a Linux scan, so "auto" falls '
+                         'back to the powershell bridge on COM3.')
     ap.add_argument("--transport", choices=["auto", "pyserial", "powershell"], default="auto",
                     help="serial backend (auto: COMx under WSL -> powershell bridge, else pyserial)")
     ap.add_argument("--show", action="store_true", help="print current settings (read-only)")
