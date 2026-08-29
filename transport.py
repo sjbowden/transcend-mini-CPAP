@@ -39,6 +39,10 @@ SETTLE_S = 0.06        # quiet period + input flush before each command
 CPAP_USB_IDS = ((0x0403, 0x6015),   # FTDI FT-X
                 (0x10C4, 0xEA60))   # Silicon Labs CP210x
 
+# Where "auto" lands under WSL, where find_port() is structurally blind (see
+# make_transport). Overridable with an explicit --port on the rare non-COM3 box.
+WSL_DEFAULT_PORT = "COM3"
+
 
 class TransportError(RuntimeError):
     """Transport-level failure: port unavailable, helper missing, timeout."""
@@ -80,13 +84,23 @@ def make_transport(port, prefer="auto"):
     if port == "auto":
         # Resolve the magic port name "auto" to a real device by USB VID:PID.
         found = find_port()
-        if not found:
+        if found:
+            port = found
+        elif is_wsl() or prefer == "powershell":
+            # Under WSL the CPAP enumerates on the *Windows* side, so a
+            # Linux-side pyserial scan can never see it (we deliberately do
+            # not require usbipd). Fall through to the default COM port and
+            # let the backend selection below route it over the powershell
+            # bridge -- that is the zero-config WSL path. Asking for the
+            # bridge explicitly means the same thing: it can only ever drive
+            # a COM port, so resolving by VID:PID is not the relevant test.
+            port = WSL_DEFAULT_PORT
+        else:
             raise TransportError(
                 "no Transcend USB-serial device found (FTDI 0403:6015 or "
                 "CP210x 10C4:EA60). Plug the CPAP in with a data USB-C cable, "
                 "or pass an explicit --port (macOS: /dev/cu.usbserial-XXXX, "
                 "Windows: COM3). List ports: python3 -m serial.tools.list_ports -v")
-        port = found
     if prefer in (None, "auto"):
         # A COMx name only means something to Windows; from WSL/Linux it must
         # go through powershell.exe. A /dev/... port is always pyserial.

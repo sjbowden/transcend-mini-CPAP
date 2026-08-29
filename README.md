@@ -83,7 +83,7 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 | [`PROTOCOL.md`](PROTOCOL.md) | The reverse‑engineered serial wire protocol (commands, framing, the 5‑byte event format, all 28 event types) |
 | `pipeline.sh` | End‑to‑end orchestrator: pull → convert → upload (with stage‑skip flags); OS‑agnostic, calls `collect.py` |
 | `app.py` | **Cross‑platform GUI** (macOS/Linux/Windows, plain tkinter) — Pull / Convert / Upload buttons + read‑only settings view, port auto‑prefilled. See [`packaging/MACOS.md`](packaging/MACOS.md) / [`packaging/WINDOWS.md`](packaging/WINDOWS.md) |
-| `transport.py` | Serial backends, auto‑selected: **pyserial** (native macOS/Linux/Windows) or the **powershell.exe bridge** (WSL, no usbipd). `find_port()` locates the device by USB VID:PID on any OS |
+| `transport.py` | Serial backends, auto‑selected: **pyserial** (native macOS/Linux/Windows) or the **powershell.exe bridge** (WSL, no usbipd). `find_port()` locates the device by USB VID:PID; under WSL, where the device sits on the Windows side and is invisible to a Linux‑side scan, `--port auto` falls back to the bridge on `COM3` |
 | `collect.py` | Pure‑Python, cross‑platform event‑log collector (same `dump.txt` format as `collect.ps1`); what `pipeline.sh` and `app.py` call |
 | `collect.ps1` | Original PowerShell collector — kept for reference; native Windows/WSL runs now go through `collect.py` |
 | `parse.py` | Decodes the event log → `events.csv`, `sessions.csv`, and a printed summary |
@@ -102,14 +102,16 @@ Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 
 - A Transcend Micro (or family) CPAP on a **data‑capable** USB cable. Depending on hardware
   revision it enumerates as either an **FTDI** serial port (`VID_0403 PID_6015`) or a
-  **Silicon Labs CP210x** (`VID_10C4 PID_EA60`) — both work, and `--port auto` finds
-  either one for you.
+  **Silicon Labs CP210x** (`VID_10C4 PID_EA60`) — both work, and `--port auto` (the
+  default everywhere) finds either one for you.
   - On a USB‑C Mac, if the device enumerates and then immediately drops, that's a
     Type‑C power‑negotiation quirk on some ports, not a bad cable — a USB‑C‑to‑USB‑A
     adapter fixes it (see [`packaging/MACOS.md`](packaging/MACOS.md)).
 - **macOS or Linux** (native, via pyserial) — see [`packaging/MACOS.md`](packaging/MACOS.md).
 - **Windows** (the device's COM port, native pyserial), or **WSL** — `collect.py`'s
-  powershell.exe bridge needs no `usbipd` under WSL.
+  powershell.exe bridge needs no `usbipd` under WSL. A Linux‑side VID:PID scan cannot
+  see a device attached to Windows, so under WSL `--port auto` resolves to the bridge
+  on `COM3`; pass `--port COM4` (etc.) if yours enumerates elsewhere.
 - Python 3.8+ for `parse.py` / `convert.py` / `sleephq/upload.py` (standard library only).
   `pyserial` is needed only for the direct‑serial transport (native macOS/Linux/Windows,
   or a usbipd‑attached port under WSL); the WSL powershell‑bridge path needs nothing extra.
