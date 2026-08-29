@@ -53,13 +53,22 @@ def find_port():
 
     Matches by USB VID:PID, so it returns the right thing on every OS without
     hard-coding names: macOS (/dev/cu.usbserial-XXXX or /dev/cu.SLAB_USBtoUART),
-    Linux (/dev/ttyUSB0), Windows (COMx). Requires pyserial; returns None if it
-    is not installed or no matching device is attached."""
+    Linux (/dev/ttyUSB0), Windows (COMx). Requires pyserial; returns None if no
+    matching device is attached. Raises TransportError if pyserial is missing --
+    "you have no driver" and "you have no device" need different fixes, so they
+    must not collapse into the same answer."""
     try:
         from serial.tools import list_ports
     except ImportError:
-        return None
-    for p in list_ports.comports():
+        raise TransportError(
+            "cannot search for the device: pyserial is not installed — "
+            "pip install pyserial (or pass an explicit --port and "
+            "--transport powershell to use the WSL bridge instead)")
+    try:
+        ports = list_ports.comports()
+    except OSError as e:
+        raise TransportError(f"cannot enumerate serial ports: {e}")
+    for p in ports:
         if p.vid is not None and (p.vid, p.pid) in CPAP_USB_IDS:
             return p.device
     return None
@@ -82,25 +91,29 @@ def make_transport(port, prefer="auto"):
     if hasattr(prefer, "command"):
         return prefer
     if port == "auto":
-        # Resolve the magic port name "auto" to a real device by USB VID:PID.
-        found = find_port()
-        if found:
-            port = found
-        elif is_wsl() or prefer == "powershell":
-            # Under WSL the CPAP enumerates on the *Windows* side, so a
-            # Linux-side pyserial scan can never see it (we deliberately do
-            # not require usbipd). Fall through to the default COM port and
-            # let the backend selection below route it over the powershell
-            # bridge -- that is the zero-config WSL path. Asking for the
-            # bridge explicitly means the same thing: it can only ever drive
-            # a COM port, so resolving by VID:PID is not the relevant test.
+        # Resolve the magic port name "auto" to a real port. The bridge can
+        # only ever drive a COM port, so if it was asked for by name there is
+        # nothing to scan for -- handing it a /dev node found by VID:PID would
+        # just pass a Linux device path to pap.ps1. Check that first.
+        if prefer == "powershell":
             port = WSL_DEFAULT_PORT
         else:
-            raise TransportError(
-                "no Transcend USB-serial device found (FTDI 0403:6015 or "
-                "CP210x 10C4:EA60). Plug the CPAP in with a data USB-C cable, "
-                "or pass an explicit --port (macOS: /dev/cu.usbserial-XXXX, "
-                "Windows: COM3). List ports: python3 -m serial.tools.list_ports -v")
+            found = find_port()
+            if found:
+                port = found
+            elif is_wsl():
+                # Under WSL the CPAP enumerates on the *Windows* side, so a
+                # Linux-side pyserial scan can never see it (we deliberately
+                # do not require usbipd). Fall through to the default COM port
+                # and let the backend selection below route it over the
+                # bridge -- that is the zero-config WSL path.
+                port = WSL_DEFAULT_PORT
+            else:
+                raise TransportError(
+                    "no Transcend USB-serial device found (FTDI 0403:6015 or "
+                    "CP210x 10C4:EA60). Plug the CPAP in with a data USB-C cable, "
+                    "or pass an explicit --port (macOS: /dev/cu.usbserial-XXXX, "
+                    "Windows: COM3). List ports: python3 -m serial.tools.list_ports -v")
     if prefer in (None, "auto"):
         # A COMx name only means something to Windows; from WSL/Linux it must
         # go through powershell.exe. A /dev/... port is always pyserial.

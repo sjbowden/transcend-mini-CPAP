@@ -39,13 +39,16 @@ else
 fi
 
 pull=1 convert=1 upload=1 dry=""
-for a in "$@"; do
+# bash < 4.4 (macOS still ships 3.2) treats "$@" as unbound under `set -u`
+# when there are no positional parameters, so guard the loop -- `./transcend`
+# with no arguments is the common case.
+for a in ${@+"$@"}; do
   case "$a" in
     --no-pull)    pull=0 ;;
     --no-convert) convert=0 ;;
     --no-upload)  upload=0 ;;
     --dry-run)    dry="--dry-run" ;;
-    -h|--help)    sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,23p' "$0"; exit 0 ;;
     *) echo "unknown arg: $a (try --help)" >&2; exit 2 ;;
   esac
 done

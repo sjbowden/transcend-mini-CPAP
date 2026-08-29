@@ -40,7 +40,7 @@ from transport import TransportError  # noqa: E402
 DUMP = os.path.join(HERE, "dump.txt")
 OUT = os.path.join(HERE, "sleephq", "out")
 UPLOADER = os.environ.get("SLEEPHQ_UPLOADER",
-                          os.path.expanduser("~/cpap/sleephq_upload.py"))
+                          os.path.join(HERE, "sleephq", "upload.py"))
 
 
 def python_exe():
@@ -63,9 +63,11 @@ class App:
         top = ttk.Frame(root, padding=8)
         top.pack(fill="x")
         ttk.Label(top, text="Port:").pack(side="left")
-        # "auto" resolves to the attached CPAP by USB VID:PID (see transport.py);
-        # if exactly one is present we can prefill its real device node.
-        self.port = tk.StringVar(value=ttransport.find_port() or "auto")
+        # Keep the literal "auto" in the field rather than baking in a device
+        # node: it re-resolves on every action, so replugging the CPAP onto a
+        # different node mid-session still works. The detected port is logged
+        # below, and device errors report the port actually opened.
+        self.port = tk.StringVar(value="auto")
         ttk.Entry(top, textvariable=self.port, width=24).pack(side="left", padx=(4, 16))
 
         self.buttons = []
@@ -88,9 +90,21 @@ class App:
         self.log(f"output:   {OUT}")
         self.log(f"uploader: {UPLOADER}"
                  + ("" if os.path.exists(UPLOADER) else "   (NOT FOUND — set SLEEPHQ_UPLOADER)"))
+        self.log(f"port:     auto -> {self._detected_port()}")
         self.log("Ready. Device settings are view-only here; use settings.py to change them.\n")
 
     # ------------------------------------------------------------------ infra
+    @staticmethod
+    def _detected_port():
+        """What "auto" resolves to right now, for the startup banner only —
+        never fatal, since the GUI must open even with no device or pyserial."""
+        try:
+            return ttransport.find_port() or (
+                f"{ttransport.WSL_DEFAULT_PORT} (WSL bridge)" if ttransport.is_wsl()
+                else "nothing detected — plug the CPAP in")
+        except TransportError as e:
+            return str(e)
+
     def log(self, msg):
         self.q.put(str(msg))
 
