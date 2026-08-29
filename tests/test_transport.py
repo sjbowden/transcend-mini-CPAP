@@ -295,6 +295,38 @@ class TestCollect(unittest.TestCase):
         # no third block request after the partial one
         self.assertEqual(sum(1 for c in ft.commands if c.startswith("Ta9")), 3)
 
+    def test_short_response_raises_instead_of_ending_the_walk(self):
+        # A truncated response used to be indistinguishable from "end of data":
+        # both just stopped, and the dump looked healthy but was missing nights.
+        m = self._mapping()
+        full = m["Ta9%04X%04X" % (self.ADDR + 50, 1000)]
+        m["Ta9%04X%04X" % (self.ADDR + 1050, 1000)] = full[:3 + 1000]   # half a block
+        ft = FakeTransport(m)
+        with tempfile.TemporaryDirectory() as d:
+            dump = os.path.join(d, "x")
+            with self.assertRaises(transport.TransportError) as cm:
+                tcollect.collect("COM_TEST", dump, transport=ft, log=lambda *_: None)
+            self.assertIn("truncated", str(cm.exception))
+            self.assertIn("INCOMPLETE", str(cm.exception))
+            # the partial dump is still written, and marks where it stopped
+            body = open(dump).read()
+            self.assertIn("SHORTBLOCK", body)
+            # parse.py ignores the marker (it matches "BLOCK ", with the space)
+            _, events = parse.load_events(dump)
+            self.assertEqual(len(events), 300)      # 200 full + 100 from the short block
+
+    def test_full_block_padded_with_ff_is_a_clean_end(self):
+        # The other half of the distinction: a FULL response that runs into the
+        # unwritten region is the normal, silent way a pull finishes.
+        ft = FakeTransport(self._mapping())
+        with tempfile.TemporaryDirectory() as d:
+            dump = os.path.join(d, "x")
+            blocks = tcollect.collect("COM_TEST", dump, transport=ft, log=lambda *_: None)
+            body = open(dump).read()
+        self.assertEqual(blocks, 2)
+        self.assertNotIn("SHORTBLOCK", body)
+        self.assertNotIn("BLOCKERR", body)
+
     def test_dead_device_raises(self):
         ft = FakeTransport({"Tbd": "", "Tff": "", "Ta8": ""})
         with tempfile.TemporaryDirectory() as d:
