@@ -1,8 +1,11 @@
 # Vendor documentation — distilled notes
 
 Facts extracted from the official Somnetics PDFs (reviewed 2026-06-10). The PDFs
-themselves are **git-ignored** (Somnetics copyright — obtain from mytranscend.com);
-this file keeps the project-relevant content with document numbers and page cites.
+themselves are **git-ignored** (Somnetics copyright — obtain from mytranscend.com)
+but live in *this directory*, so every page cite below can be checked against the
+source. This file keeps the project-relevant content with document numbers and
+page cites. The vendor's desktop app — the decompile source behind `PROTOCOL.md` —
+is in [`../vendor/`](../vendor/README.md), also git-ignored.
 
 **The device this repo targets is a Somnetics Transcend Micro 510.** The desktop
 software is called "mini" / "mini PAP" (its install icon is literally "MiniCPAP"),

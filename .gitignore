@@ -18,3 +18,9 @@ blob-baseline.json
 
 # Vendor manuals (Somnetics copyright — get from mytranscend.com; see docs/NOTES.md)
 docs/*.pdf
+
+# Vendor app payload — Somnetics copyright, ~60MB of .NET binaries. This is the
+# decompile source behind PROTOCOL.md; kept locally for provenance, never
+# committed. See vendor/README.md (tracked) for what belongs here.
+vendor/*
+!vendor/README.md
