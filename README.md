@@ -187,13 +187,25 @@ appears as a separate machine (rename it / set your day‑split in the SleepHQ U
 > therapy records). No real ResMed machine or SD card is needed to run the converter.
 
 ### 4. Upload to SleepHQ
-```bash
-# One-time: create an API client in SleepHQ's Account Settings, then save
-# ~/.sleephq_credentials (chmod 600):
-#   SLEEPHQ_CLIENT_ID=...
-#   SLEEPHQ_CLIENT_SECRET=...
-#   # SLEEPHQ_TEAM_ID=...   (optional; default team is used if omitted)
+One-time: create an API client in SleepHQ's Account Settings, then save
+`~/.sleephq_credentials` (`chmod 600`) as JSON:
+```json
+{
+  "client_id":     "...",
+  "client_secret": "...",
+  "username":      "you@example.com",
+  "password":      "...",
+  "team_id":       "..."
+}
+```
+`username`/`password` are your SleepHQ login and are **required** — the API uses
+an OAuth *password* grant, so the client pair alone cannot authenticate.
+`team_id` is optional (the default team is used if omitted). This is the same
+file format the companion uploader in `~/projects/cpap` writes, so one file
+serves both. A legacy `SLEEPHQ_CLIENT_ID=...` KEY=VALUE file still works, and
+`SLEEPHQ_*` environment variables override the file.
 
+```bash
 python3 sleephq/upload.py --data-dir sleephq/out --all --dry-run   # preview, sends nothing
 python3 sleephq/upload.py --data-dir sleephq/out --all \
     --import-name "Transcend (all, $(date +%Y-%m-%d))"

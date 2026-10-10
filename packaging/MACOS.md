@@ -74,13 +74,22 @@ picks the serial backend itself.
 
 Uploading needs a SleepHQ API client. In SleepHQ, go to Account Settings and
 create one to get a Client ID and Client Secret, then create
-`~/.sleephq_credentials` (`chmod 600`):
+`~/.sleephq_credentials` (`chmod 600`) as JSON:
 
+```json
+{
+  "client_id":     "...",
+  "client_secret": "...",
+  "username":      "you@example.com",
+  "password":      "...",
+  "team_id":       "..."
+}
 ```
-SLEEPHQ_CLIENT_ID=...
-SLEEPHQ_CLIENT_SECRET=...
-# SLEEPHQ_TEAM_ID=...   (optional; default team is used if omitted)
-```
+
+`username`/`password` are your SleepHQ login and are **required** — the API uses
+an OAuth *password* grant, so the client pair alone cannot authenticate.
+`team_id` is optional. A legacy KEY=VALUE file still works, and `SLEEPHQ_*`
+environment variables override the file.
 
 `sleephq/upload.py` (pure stdlib, no extra dependencies) reads those and
 handles auth, import creation, file upload, and processing — see its
