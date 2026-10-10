@@ -56,13 +56,57 @@ These return plain **comma-separated decimals** (not hex), one value per `Respon
 | `Tb8`| `Rb8`| Patient hours      | `hours,minutes,seconds,#sessions≥8h,#sessions6–8h,#sessions4–6h` — actual breathing time (shorter than blower time) + a session-length histogram |
 | `Tff`| `Rff`| Device type        | a 4-char code string (e.g. `8011`); the CPAP/APAP/EZEX *class* is taken from the serial's first char, not this |
 | `T6d`| `R6d`| Device state       | **opaque** — the app declares no fields and never decodes it |
-| `Ta3`| `Ra3`| Monitor data (live)| `pressureGoal×0.1, measuredPressure×0.1, lungFlow×0.1, leak×0.1, mode` — real-time only |
-| `Tc3`| `Tc3`| Flow (live)        | `hoseFlow, baselineFlow` — real-time only |
-| `T60`| `R60`| Pressure sensor    | `pressure×0.1` (live) |
+| `Ta3`| `Ra3`| Monitor data (live)| `pressureGoal×0.1, measuredPressure×0.1, lungFlow×0.1, leak×0.1, mode` — real-time only. **Confirmed during therapy**, see below |
+| `Tc3`| `Rc3`| Flow (live)        | **7 fields**, not the 2 the app declares (`hoseFlow, baselineFlow`) — see below. Real-time only |
+| `T60`| `R60`| Pressure sensor    | **4 hex digits — a raw sensor count, NOT the `pressure×0.1` decimal the app declares.** See below |
 | `Tb3`| `Rb3`| Calibration offset | `sign, offset×0.1` (display only) |
 
 Example (this device): `Tbc → Rbc7,2,36` = 7 h 2 m 36 s blower; `Tb8 → Rb86,31,18,0,1,0`
 = 6 h 31 m 18 s patient time, 1 session of 6–8 h.
+
+### Live monitor commands, measured during actual therapy (2026-10-10)
+
+The three live commands had only ever been read from the decompile; these are 16
+samples taken over ~1 minute with a mask on a sleeping subject, device holding
+12.0 cmH₂O (APAP 12.0–15.0, EZEX off).
+
+**`Ta3` is correct as documented.** `Ra3120,120,407,0,1` →
+pressureGoal 12.0 cmH₂O (matches the configured `StartingTherapyPressure`),
+measuredPressure 12.0 (tracked the goal within ±0.2 throughout), lungFlow
++40.7 L/min, leak 0.0, mode 1. `lungFlow` is **signed** and swung
+**+40.7 / −26.2 L/min** across the breath cycle — inspiration positive,
+expiration negative. It is genuine respiratory flow, not a running average.
+
+**`T60` is NOT `pressure×0.1`.** The response is four **hex** digits, e.g.
+`R600302` → `0x0302` = 770. Observed range **739–777 while therapy held a
+measured 12.0 cmH₂O**; the documented ×0.1 would imply ~77 cmH₂O, which is
+physically impossible. It is a raw sensor count that tracks pressure.
+- A purely multiplicative scale would be ≈ **63.8 counts/cmH₂O** (mean 766 ÷ 12.0),
+  but **gain and offset cannot be separated from a single operating pressure**.
+  To finish this, sample `T60` during a ramp (start pressure 4.0 → therapy 12.0)
+  and solve the two points; until then treat the scale as unknown.
+
+**`Tc3` returns 7 fields, not 2.** e.g. `Rc32.42,18.65,-1948,-1948,-2048,120,21550`:
+
+| # | Observed | Reading |
+|---|---|---|
+| 1 | −0.82 … 57.49, signed | `hoseFlow` L/min — as declared; varies with the breath |
+| 2 | 17.47 … 25.39 | `baselineFlow` — as declared; near-constant ~21 |
+| 3 | `-1948` (16/16) | constant — fixed calibration reference |
+| 4 | `-1948` (16/16) | constant — same value as field 3 |
+| 5 | `-2048` (16/16) | constant, = −2¹¹ (12-bit signed floor) |
+| 6 | `120` (16/16) | pressure goal ×10 — identical to `Ta3` field 1 |
+| 7 | 21244 … 28511 | raw count behind field 1: least-squares over the 16 samples gives **field7 ≈ 124·hoseFlow + 21175, R² = 0.979** |
+
+Fields 3–5 never moved, so they are constants rather than live signals; whether
+they are per-unit calibration or firmware-fixed is unknown (one device sampled).
+The field-7 fit carries noise (max residual ~970 counts) because the three
+commands are issued sequentially ~1 s apart, so they do not sample the same
+instant of the breath.
+
+> **None of this affects the data pipeline** — `collect.py` reads only the event
+> log, and nothing in the toolchain issues the live commands. It matters for
+> anyone building a live monitor on this protocol.
 
 > **Firmware version is not exposed over USB.** There is **no** get-firmware-version
 > command in the entire serial command set — the only firmware datum on the wire is the
