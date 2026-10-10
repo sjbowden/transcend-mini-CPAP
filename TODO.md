@@ -2,16 +2,27 @@
 
 ## Windows app
 
-- ⚠️ **Live-validate the pyserial transport on Windows** (`transport.py` / `collect.py`).
-  It mirrors pap.ps1/collect.ps1 timing exactly and is unit-tested against a fake serial
-  port. It has since been exercised against real hardware on **macOS** (see the upstream
-  macOS work merged in `macos-support` — the USB-C power-negotiation and driver findings
-  in `packaging/MACOS.md` could only come from a live device), and `pipeline.sh` now calls
-  `collect.py` on every OS. What is still **not** done is the back-to-back equivalence
-  check on Windows: `python collect.py --port COM3 --out dump-pyserial.txt`, then diff the
-  BLOCK records against a `collect.ps1` dump taken immediately after (allow a few new tail
-  events between pulls). Also exercise `settings.py --show --transport pyserial`. Until
-  that diff is run, `collect.ps1` stays in the tree as the reference implementation.
+- ✅ **DONE (2026-10-10) — pyserial transport validated against the real device.**
+  Equivalence check run back-to-back on the same unit: a `collect.py --transport pyserial`
+  pull and a `collect.ps1` pull produced **byte-identical** output — not just matching
+  BLOCK records but the whole file (modulo collect.ps1's CRLF), both decoding to the same
+  92 events over the same timestamp range. `settings.py --show --transport pyserial` also
+  read every field, identical to the powershell-bridge read. `find_port()` auto-detected
+  the unit by VID:PID `0403:6015` and `make_transport("auto")` correctly preferred the real
+  device node over the WSL COM3 fallback — both previously only unit-tested against fakes.
+  - **How it was driven:** pyserial cannot reach the device from WSL directly, so the unit
+    was attached with `usbipd bind --busid 2-3` (admin, one-off) + `usbipd attach --wsl`,
+    appearing as `/dev/ttyUSB0`. Windows loses COM3 while attached, so the `collect.ps1`
+    half needs `usbipd detach --busid 2-3` first. The USB/IP link dropped once after
+    ~15 min (`vhci_hcd: connection reset by peer`); re-attach needs no admin.
+  - ⚠️ **Two gaps this run did NOT close.** (1) It went through **USB/IP, not a native
+    Windows FTDI driver**, so native-Windows timing is still formally unproven — though the
+    same `PySerialTransport.command()` code ran either way. (2) The device held only **one
+    block** of data (92 valid records), so the **multi-block walk was not exercised against
+    real hardware** — `next_start += READ_SIZE` and the loop continuation are still only
+    covered by unit tests and by `collect.ps1`'s historical 3-block pulls. Re-run the diff
+    when the unit next holds >200 records to close that. `collect.ps1` stays in the tree as
+    the reference implementation.
 - ⬜ **Build + smoke-test the .exe** per packaging/WINDOWS.md (needs Windows Python:
   pyinstaller is not a cross-compiler). Check the bundled templates resolve (one Convert
   run) and note the SmartScreen first-run warning.

@@ -50,11 +50,17 @@ fully usable from WSL too — just slower per command than native pyserial.
 
 The pyserial backend mirrors `pap.ps1`/`collect.ps1` timing (60 ms settle,
 12 ms char gap, two-CR framing, nulls discarded, RTS/DTR held low) and is
-covered by unit tests against a fake serial port. It has been exercised against
-a real device on **macOS**, and `pipeline.sh` now calls `collect.py` on every OS
-— but the **Windows** path has not been diffed against `collect.ps1` on real
-hardware. Before trusting it here: run
-`python collect.py --port COM3 --out dump-pyserial.txt` on Windows and diff
-against a `collect.ps1` dump taken back-to-back (event records should be
-identical; the queue may have gained a few events between pulls). `collect.ps1`
-remains in the tree as the reference implementation until that diff is run.
+covered by unit tests against a fake serial port, and **validated against the
+real device on 2026-10-10**: a pyserial pull and a `collect.ps1` pull taken
+back-to-back were byte-identical (whole file, modulo CRLF), and
+`settings.py --show --transport pyserial` matched the bridge read field for field.
+
+Two caveats on that run. It was driven over **USB/IP** (`usbipd attach --wsl`,
+the device appearing as `/dev/ttyUSB0`) rather than a native Windows FTDI
+driver — the same `PySerialTransport` code path, but not the native stack. And
+the unit held only **one block** of data, so the multi-block walk is still
+unexercised on real hardware. `collect.ps1` therefore stays in the tree as the
+reference implementation; re-run the diff when the device holds >200 records.
+
+Note while attached to WSL the device disappears from Windows, so COM3 and the
+vendor app cannot see it until `usbipd detach --busid <id>`.

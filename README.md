@@ -115,6 +115,18 @@ Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 - Python 3.8+ for `parse.py` / `convert.py` / `sleephq/upload.py` (standard library only).
   `pyserial` is needed only for the direct‑serial transport (native macOS/Linux/Windows,
   or a usbipd‑attached port under WSL); the WSL powershell‑bridge path needs nothing extra.
+- **On Linux (and a usbipd‑attached port under WSL), the port node is `root:dialout` mode
+  0660** — opening it as an ordinary user fails with `Permission denied`. Either add
+  yourself once with `sudo usermod -aG dialout $USER` (needs a fresh login to take effect)
+  or `sudo chmod 666 /dev/ttyUSB0` for the session. The node is recreated on every
+  re‑attach, so the `chmod` does not persist.
+- **To drive pyserial from WSL** (instead of the powershell bridge), attach the USB device
+  into WSL with [usbipd‑win](https://github.com/dorssel/usbipd-win):
+  `usbipd list` to find the bus id, `usbipd bind --busid <id>` once as administrator, then
+  `usbipd attach --wsl --busid <id>`. It then appears as `/dev/ttyUSB0` and `--port auto`
+  finds it. **Windows loses the COM port while it is attached** — run
+  `usbipd detach --busid <id>` to give it back. The USB/IP link can drop on its own
+  (`vhci_hcd: connection reset by peer` in `dmesg`); re‑attaching needs no administrator.
 
 ## Usage
 
