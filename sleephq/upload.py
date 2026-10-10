@@ -17,10 +17,22 @@ https://github.com/amanuense/CPAP_data_uploader):
 Setup:
     1. In SleepHQ, go to Account Settings and create an API client to get a
        Client ID and Client Secret.
-    2. Create ~/.sleephq_credentials (KEY=VALUE, one per line, chmod 600):
-           SLEEPHQ_CLIENT_ID=...
-           SLEEPHQ_CLIENT_SECRET=...
-           # SLEEPHQ_TEAM_ID=...          (optional; default team is used if omitted)
+    2. Create ~/.sleephq_credentials (chmod 600). JSON is the canonical form --
+       it is the format the existing community SleepHQ uploaders use, so one
+       file can serve several tools:
+           {
+             "client_id":     "...",
+             "client_secret": "...",
+             "username":      "you@example.com",
+             "password":      "...",
+             "team_id":       "..."        (optional; default team if omitted)
+           }
+       A legacy KEY=VALUE file (SLEEPHQ_CLIENT_ID=... one per line) is also
+       accepted. Environment variables SLEEPHQ_CLIENT_ID, SLEEPHQ_CLIENT_SECRET,
+       SLEEPHQ_USERNAME, SLEEPHQ_PASSWORD and SLEEPHQ_TEAM_ID override the file.
+
+    The username and password are required: SleepHQ's OAuth endpoint uses a
+    *password* grant, so the client pair alone cannot authenticate.
 
 Usage:
     python3 sleephq/upload.py --data-dir ./sleephq/out --all \
@@ -41,6 +53,8 @@ from urllib.parse import urlencode
 DEFAULT_BASE_URL = "https://sleephq.com"
 DEFAULT_CREDENTIALS = os.path.expanduser("~/.sleephq_credentials")
 API_VERSION = "/api/v1"
+# "delete" is needed so error-cleanup can remove a half-made import; without
+# it the API answers 403 ('requires scope "delete"').
 TOKEN_SCOPE = "read write delete"
 
 
@@ -48,27 +62,76 @@ class SleepHQError(RuntimeError):
     """API call failed (bad credentials, network error, unexpected response)."""
 
 
+FIELDS = ("client_id", "client_secret", "username", "password", "team_id")
+REQUIRED = ("client_id", "client_secret", "username", "password")
+
+
+def _read_credentials_file(path):
+    """Parse the credentials file. JSON is canonical (it is what the companion
+    format the existing community SleepHQ uploaders use, so one file can serve
+    several tools); the older KEY=VALUE form is still accepted. Returns {} if
+    the file is absent."""
+    if not os.path.isfile(path):
+        return {}
+    with open(path) as f:
+        text = f.read()
+
+    stripped = text.lstrip()
+    if stripped.startswith("{"):
+        try:
+            obj = json.loads(text)
+        except ValueError as e:
+            raise SleepHQError(f"{path} is not valid JSON: {e}")
+        if not isinstance(obj, dict):
+            raise SleepHQError(f"{path} must contain a JSON object, got {type(obj).__name__}")
+        # Accept either bare keys ("client_id") or the SLEEPHQ_-prefixed spelling.
+        out = {}
+        for k, v in obj.items():
+            key = k.strip().lower()
+            if key.startswith("sleephq_"):
+                key = key[len("sleephq_"):]
+            if key in FIELDS and v:
+                out[key] = str(v).strip()
+        return out
+
+    out = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip().lower()
+        if key.startswith("sleephq_"):
+            key = key[len("sleephq_"):]
+        if key in FIELDS and value.strip():
+            out[key] = value.strip()
+    return out
+
+
 def load_credentials(path):
-    creds = {
-        "SLEEPHQ_CLIENT_ID": os.environ.get("SLEEPHQ_CLIENT_ID"),
-        "SLEEPHQ_CLIENT_SECRET": os.environ.get("SLEEPHQ_CLIENT_SECRET"),
-        "SLEEPHQ_TEAM_ID": os.environ.get("SLEEPHQ_TEAM_ID"),
-    }
-    if os.path.isfile(path):
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                key = key.strip()
-                if key in creds and value.strip():
-                    creds[key] = value.strip()
-    if not creds["SLEEPHQ_CLIENT_ID"] or not creds["SLEEPHQ_CLIENT_SECRET"]:
+    """Credentials from the environment, falling back to `path`.
+
+    The environment wins: an explicit SLEEPHQ_* variable is a deliberate
+    override for one run and should not be silently beaten by the stored file."""
+    creds = _read_credentials_file(path)
+    for field in FIELDS:
+        env = os.environ.get("SLEEPHQ_" + field.upper())
+        if env:
+            creds[field] = env.strip()
+
+    missing = [f for f in REQUIRED if not creds.get(f)]
+    if missing:
         raise SleepHQError(
-            f"missing SleepHQ API credentials. Set SLEEPHQ_CLIENT_ID and "
-            f"SLEEPHQ_CLIENT_SECRET in {path} (or the environment). Get a "
-            f"Client ID/Secret from SleepHQ's Account Settings.")
+            f"missing SleepHQ credentials: {', '.join(missing)}. Add them to "
+            f"{path} (JSON object with client_id/client_secret/username/password) "
+            f"or set SLEEPHQ_{missing[0].upper()} in the environment. The Client "
+            f"ID/Secret come from SleepHQ's Account Settings; username/password "
+            f"are your SleepHQ login -- the OAuth endpoint uses a password grant, "
+            f"so the client pair alone cannot authenticate.")
+
+    if os.path.isfile(path) and (os.stat(path).st_mode & 0o077):
+        print(f"warning: {path} is readable by other users; chmod 600 it "
+              f"(it holds your SleepHQ password)", file=sys.stderr)
     return creds
 
 
@@ -100,11 +163,15 @@ def api_request(base_url, method, path, token=None, data=None, headers=None,
         raise SleepHQError(f"{method} {path} failed (network): {e}")
 
 
-def get_access_token(base_url, client_id, client_secret):
+def get_access_token(base_url, creds):
+    # A password grant needs the resource owner's credentials, not just the
+    # client pair -- without username/password SleepHQ answers invalid_grant.
     body = urlencode({
         "grant_type": "password",
-        "client_id": client_id,
-        "client_secret": client_secret,
+        "client_id": creds["client_id"],
+        "client_secret": creds["client_secret"],
+        "username": creds["username"],
+        "password": creds["password"],
         "scope": TOKEN_SCOPE,
     }).encode("ascii")
     status, body_bytes = api_request(
@@ -243,8 +310,8 @@ def main(argv=None):
 
     creds = load_credentials(args.credentials)
     print(f"Authenticating with {args.base_url} ...")
-    token = get_access_token(args.base_url, creds["SLEEPHQ_CLIENT_ID"], creds["SLEEPHQ_CLIENT_SECRET"])
-    team_id = get_team_id(args.base_url, token, creds["SLEEPHQ_TEAM_ID"])
+    token = get_access_token(args.base_url, creds)
+    team_id = get_team_id(args.base_url, token, creds.get("team_id"))
     print(f"Creating import for team {team_id} (\"{label}\") ...")
     import_id = create_import(args.base_url, token, team_id)
     print(f"Uploading {len(files)} file(s) to import {import_id} ...")

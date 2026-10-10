@@ -50,11 +50,9 @@ fully usable from WSL too — just slower per command than native pyserial.
 
 The pyserial backend mirrors `pap.ps1`/`collect.ps1` timing (60 ms settle,
 12 ms char gap, two-CR framing, nulls discarded, RTS/DTR held low) and is
-covered by unit tests against a fake serial port. It has been exercised against
-a real device on **macOS**, and `pipeline.sh` now calls `collect.py` on every OS
-— but the **Windows** path has not been diffed against `collect.ps1` on real
-hardware. Before trusting it here: run
+covered by unit tests against a fake serial port — but it has **not yet been
+validated against the real device**. Before trusting it: run
 `python collect.py --port COM3 --out dump-pyserial.txt` on Windows and diff
 against a `collect.ps1` dump taken back-to-back (event records should be
-identical; the queue may have gained a few events between pulls). `collect.ps1`
-remains in the tree as the reference implementation until that diff is run.
+identical; the queue may have gained a few events between pulls). Until then,
+`pipeline.sh` keeps using `collect.ps1`.
