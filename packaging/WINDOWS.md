@@ -55,12 +55,23 @@ real device on 2026-10-10**: a pyserial pull and a `collect.ps1` pull taken
 back-to-back were byte-identical (whole file, modulo CRLF), and
 `settings.py --show --transport pyserial` matched the bridge read field for field.
 
-Two caveats on that run. It was driven over **USB/IP** (`usbipd attach --wsl`,
-the device appearing as `/dev/ttyUSB0`) rather than a native Windows FTDI
-driver — the same `PySerialTransport` code path, but not the native stack. And
-the unit held only **one block** of data, so the multi-block walk is still
-unexercised on real hardware. `collect.ps1` therefore stays in the tree as the
-reference implementation; re-run the diff when the device holds >200 records.
+That was confirmed on **both** stacks: over USB/IP into WSL
+(`usbipd attach --wsl`, device as `/dev/ttyUSB0`) and on the **native Windows
+driver** (Python 3.12.10 + pyserial, device on COM3). All three dumps — native
+pyserial, usbipd pyserial, and `collect.ps1` — are byte-identical once CRLF is
+normalised.
+
+One caveat remains: the unit held only **one block** of data, so the
+multi-block walk is still unexercised on real hardware. `collect.ps1` therefore
+stays in the tree as the reference implementation; re-run the diff when the
+device holds >200 records.
+
+Running the repo from native Windows while it lives in WSL: invoke the script by
+its UNC path, e.g.
+`python \\wsl.localhost\Ubuntu\home\<you>\projects\transcend\collect.py --port COM3 --out dump.txt`.
+Python puts the *script's* directory on `sys.path`, so `transport.py` imports
+fine even though the working directory is elsewhere (Windows processes cannot
+have a UNC working directory).
 
 Note while attached to WSL the device disappears from Windows, so COM3 and the
 vendor app cannot see it until `usbipd detach --busid <id>`.

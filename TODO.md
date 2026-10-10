@@ -15,14 +15,18 @@
     appearing as `/dev/ttyUSB0`. Windows loses COM3 while attached, so the `collect.ps1`
     half needs `usbipd detach --busid 2-3` first. The USB/IP link dropped once after
     ~15 min (`vhci_hcd: connection reset by peer`); re-attach needs no admin.
-  - ⚠️ **Two gaps this run did NOT close.** (1) It went through **USB/IP, not a native
-    Windows FTDI driver**, so native-Windows timing is still formally unproven — though the
-    same `PySerialTransport.command()` code ran either way. (2) The device held only **one
-    block** of data (92 valid records), so the **multi-block walk was not exercised against
-    real hardware** — `next_start += READ_SIZE` and the loop continuation are still only
-    covered by unit tests and by `collect.ps1`'s historical 3-block pulls. Re-run the diff
-    when the unit next holds >200 records to close that. `collect.ps1` stays in the tree as
-    the reference implementation.
+  - **Also confirmed on the native Windows stack** (same day, Python 3.12.10 + pyserial
+    on Windows, real FTDI driver, device back on COM3): a third pull was byte-identical to
+    both the usbipd-pyserial and `collect.ps1` dumps — all three hash the same once CRLF is
+    normalised. So the transport is validated on the native driver *and* over USB/IP.
+  - ⚠️ **One gap remains.** The device held only **one block** (92 valid records), so the
+    **multi-block walk is still unexercised on real hardware** — `next_start += READ_SIZE`
+    and the loop continuation are covered only by unit tests and `collect.ps1`'s historical
+    3-block pulls. This will not close by itself: the unit has recorded nothing since
+    2026-06-20 (therapy time 0h00m against ~14h blower runtime) because nightly therapy is
+    on another machine. It needs the Transcend actually used for a few nights, or a
+    deliberate long bench run, then a re-run of the diff. `collect.ps1` stays in the tree as
+    the reference implementation until then.
 - ⬜ **Build + smoke-test the .exe** per packaging/WINDOWS.md (needs Windows Python:
   pyinstaller is not a cross-compiler). Check the bundled templates resolve (one Convert
   run) and note the SmartScreen first-run warning.
