@@ -43,6 +43,8 @@ CPAP_USB_IDS = ((0x0403, 0x6015),   # FTDI FT-X
 # make_transport). Overridable with an explicit --port on the rare non-COM3 box.
 WSL_DEFAULT_PORT = "COM3"
 
+_PS_EXE = None          # cached powershell.exe path (see powershell_exe())
+
 
 class TransportError(RuntimeError):
     """Transport-level failure: port unavailable, helper missing, timeout."""
@@ -198,6 +200,44 @@ class PySerialTransport:
         return "" if i < 0 else s[i:].strip("\r")
 
 
+def powershell_exe():
+    """Absolute path to powershell.exe, or None.
+
+    Under WSL this is normally on PATH via Windows interop, but a WSL PATH can
+    lose its /mnt/c entries (a login shell that rebuilds PATH, appendWindowsPath
+    turned off) while interop itself still works. Falling back to the standard
+    install locations keeps the bridge usable instead of failing with a
+    misleading "requires Windows or WSL"."""
+    global _PS_EXE
+    if _PS_EXE is not None:
+        return _PS_EXE or None
+    for name in ("powershell.exe", "pwsh.exe", "powershell", "pwsh"):
+        found = shutil.which(name)
+        if found:
+            _PS_EXE = found
+            return _PS_EXE
+    # Resolve the Windows drive mount rather than assuming /mnt/c.
+    roots = ["/mnt/c"]
+    try:
+        with open("/proc/mounts") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) > 2 and parts[2] in ("9p", "drvfs", "virtiofs"):
+                    roots.append(parts[1])
+    except OSError:
+        pass
+    for root in dict.fromkeys(roots):
+        for rel in ("Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+                    "Windows/SysWOW64/WindowsPowerShell/v1.0/powershell.exe",
+                    "Program Files/PowerShell/7/pwsh.exe"):
+            cand = os.path.join(root, rel)
+            if os.path.isfile(cand):
+                _PS_EXE = cand
+                return _PS_EXE
+    _PS_EXE = ""          # cache the negative result
+    return None
+
+
 class PowershellTransport:
     """One powershell.exe + pap.ps1 process per command — the original WSL
     path. Slower than pyserial (~2 s process overhead per command) but needs
@@ -226,15 +266,20 @@ class PowershellTransport:
                                              text=True).strip()
         t = int(timeout or self.timeout)
         try:
+            exe = powershell_exe()
+            if not exe:
+                raise TransportError(
+                    "powershell.exe not found — this backend requires Windows "
+                    "or WSL with Windows interop. Searched PATH and the standard "
+                    "install paths under the Windows drive mount.")
             proc = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                [exe, "-NoProfile", "-ExecutionPolicy", "Bypass",
                  "-File", script, "-Port", self.port_name,
                  "-Command", cmd, "-TimeoutSec", str(t)],
                 capture_output=True, text=True, timeout=t + 30,
             )
         except FileNotFoundError:
-            raise TransportError("powershell.exe not found — this backend "
-                                 "requires Windows or WSL")
+            raise TransportError(f"could not execute {powershell_exe()!r}")
         except subprocess.TimeoutExpired:
             raise TransportError(f"timed out waiting for response to {cmd!r} "
                                  f"on {self.port_name}")

@@ -235,6 +235,44 @@ class TestAutoPort(unittest.TestCase):
                 sys.modules.pop(m, None)
 
 
+class TestPowershellDiscovery(unittest.TestCase):
+    """powershell.exe must be found even when the WSL PATH has lost its
+    /mnt/c entries — interop still works, so failing there is wrong."""
+
+    def setUp(self):
+        self._orig = transport._PS_EXE
+        transport._PS_EXE = None
+        self.addCleanup(lambda: setattr(transport, "_PS_EXE", self._orig))
+
+    def _patch_which(self, fn):
+        orig = transport.shutil.which
+        transport.shutil.which = fn
+        self.addCleanup(lambda: setattr(transport.shutil, "which", orig))
+
+    def test_uses_path_when_available(self):
+        self._patch_which(lambda n: "/mnt/c/ps.exe" if n == "powershell.exe" else None)
+        self.assertEqual(transport.powershell_exe(), "/mnt/c/ps.exe")
+
+    def test_falls_back_to_the_drive_mount_when_path_is_empty(self):
+        self._patch_which(lambda n: None)
+        real = transport.os.path.isfile
+        target = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+        transport.os.path.isfile = lambda q: q == target or real(q)
+        self.addCleanup(lambda: setattr(transport.os.path, "isfile", real))
+        self.assertEqual(transport.powershell_exe(), target)
+
+    def test_returns_none_and_caches_when_genuinely_absent(self):
+        calls = []
+        self._patch_which(lambda n: calls.append(n) or None)
+        real = transport.os.path.isfile
+        transport.os.path.isfile = lambda q: False
+        self.addCleanup(lambda: setattr(transport.os.path, "isfile", real))
+        self.assertIsNone(transport.powershell_exe())
+        n = len(calls)
+        self.assertIsNone(transport.powershell_exe())   # second call is cached
+        self.assertEqual(len(calls), n)
+
+
 class FakeTransport:
     def __init__(self, mapping):
         self.mapping = mapping
