@@ -451,6 +451,18 @@ def main(argv=None):
     ap.add_argument("--out", default="out")
     ap.add_argument("--min-minutes", type=float, default=5.0,
                     help="drop sessions shorter than this (default 5; excludes factory/QA blips)")
+    ap.add_argument("--tz", default=None, metavar="ZONE",
+                    help="render the device's UTC timestamps in this zone instead of "
+                         "this machine's local one: an IANA name (Asia/Tokyo) or a fixed "
+                         "offset (+09:00). Needed when the sleeping happened somewhere "
+                         "other than where this machine's clock is set -- e.g. travelling "
+                         "without changing it, which would otherwise file a Tokyo night "
+                         "as a daytime nap on the wrong date.")
+    ap.add_argument("--until", type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
+                    metavar="YYYY-MM-DD",
+                    help="only sessions on/before this ResMed day. Pairs with --since to "
+                         "convert one leg of a trip at a time, so each can carry its own "
+                         "--tz (Japan +09:00, Taiwan +08:00).")
     ap.add_argument("--since", type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
                     help="only include sessions on/after this date (YYYY-MM-DD)")
     ap.add_argument("--serial", default=None,
@@ -472,7 +484,11 @@ def main(argv=None):
         if not tpl or not os.path.exists(tpl):
             sys.exit(f"Bundled template {label} missing at {tpl} (should ship in sleephq/templates/).")
 
-    header, events = tparse.load_events(args.dump)
+    try:
+        tz = tparse.resolve_tz(args.tz)
+    except ValueError as e:
+        sys.exit(f"error: {e}")
+    header, events = tparse.load_events(args.dump, tz)
     serial = args.serial or header.get("serial") or DEFAULT_SERIAL
     raw_sessions = tparse.build_sessions(events)
     # A session can be missing EndTherapy (dump taken mid-therapy, or a truncated final
@@ -485,9 +501,12 @@ def main(argv=None):
     sessions = [m for m in sessions if m["end"] and m["dur_min"] >= args.min_minutes]
     if args.since:
         sessions = [m for m in sessions if resmed_day(m["start"]) >= args.since]
+    if args.until:
+        sessions = [m for m in sessions if resmed_day(m["start"]) <= args.until]
     n_open = sum(1 for m in sessions if m["truncated"])   # count only sessions actually emitted
     if not sessions:
-        sys.exit("No sessions left after filtering (try --min-minutes 0 or an earlier --since).")
+        sys.exit("No sessions left after filtering (try --min-minutes 0, an earlier "
+                 "--since, or a later --until).")
 
     # group by ResMed day
     by_day = {}

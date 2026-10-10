@@ -6,8 +6,41 @@ Multiple dumps are merged (overlapping records deduplicated by queue address);
 pass them oldest-first. Writes events.csv (every event) and sessions.csv
 (per-therapy-session summary), and prints a summary to stdout.
 """
+import argparse
 import sys, csv
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+def resolve_tz(spec):
+    """Turn a --tz value into a tzinfo, or None for "this machine's local time".
+
+    Accepts an IANA name ("Asia/Tokyo", needs Python 3.9+ for zoneinfo) or a
+    fixed offset ("+09:00", "-0700"), which works on any version. The offset
+    form matters when the sleeping happened somewhere other than where the
+    laptop thinks it is -- travelling without changing the clock."""
+    if not spec:
+        return None
+    t = spec.strip()
+    if t.upper() == "UTC":
+        return timezone.utc
+    if t and t[0] in "+-":
+        body = t[1:].replace(":", "")
+        if not body.isdigit() or len(body) not in (2, 4):
+            raise ValueError(f"bad --tz offset {spec!r} (want +09:00, -0700 or +09)")
+        hours = int(body[:2])
+        mins = int(body[2:]) if len(body) == 4 else 0
+        delta = timedelta(hours=hours, minutes=mins)
+        return timezone(-delta if t[0] == "-" else delta)
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        raise ValueError(
+            f"--tz {spec!r} needs Python 3.9+ for zoneinfo; on 3.8 pass a fixed "
+            f"offset instead (Japan: +09:00, Taiwan: +08:00)")
+    try:
+        return ZoneInfo(t)
+    except Exception:
+        raise ValueError(f"unknown timezone {spec!r} (try e.g. Asia/Tokyo, or +09:00)")
+
 
 EVENT_TYPES = {
     1: ("StartTherapy", 0.1), 2: ("EndTherapy", 1.0),
@@ -35,8 +68,11 @@ def hexbits(h4):
     return bin(int(swap16(h4), 16))[2:].zfill(16)
 
 
-def decode_event(rec):
-    """rec = 10 hex chars (5 bytes). Returns dict or None for empty (all f)."""
+def decode_event(rec, tz=None):
+    """rec = 10 hex chars (5 bytes). Returns dict or None for empty (all f).
+
+    `tz` renders the device's UTC timestamp in that zone; None uses this
+    machine's local time."""
     if len(rec) != 10 or rec.lower() == "f" * 10:
         return None
     w1 = hexbits(rec[0:4])
@@ -50,8 +86,11 @@ def decode_event(rec):
     sub   = int(rec[8:10], 16)
     name, scale = EVENT_TYPES.get(etype, (f"Other({etype})", 1.0))
     try:
-        # device stores UTC; convert to local
-        dt = datetime(year, month, day, hour, minute, tzinfo=timezone.utc).astimezone()
+        # The device stores UTC. Render it in `tz` when given, else in this
+        # machine's local time -- which is wrong if you slept in another zone
+        # without changing the clock (see resolve_tz).
+        dt = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+        dt = dt.astimezone(tz) if tz is not None else dt.astimezone()
     except ValueError:
         return {"dt": None, "raw_dt": f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}",
                 "type": etype, "name": name, "value": sub * scale, "sub": sub, "raw": rec}
@@ -71,7 +110,7 @@ def parse_header(line):
     }
 
 
-def load_events(paths):
+def load_events(paths, tz=None):
     """Read one or more collect.ps1 dumps -> (header dict, sorted list of decoded events).
 
     Multiple dumps merge safely: the device queue is append-only and re-read in full on
@@ -102,7 +141,7 @@ def load_events(paths):
                         if key in seen:
                             continue
                         seen.add(key)
-                        ev = decode_event(rec)
+                        ev = decode_event(rec, tz)
                         if ev:
                             events.append(ev)
     events = [e for e in events if e["dt"] is not None]
@@ -130,8 +169,22 @@ def build_sessions(events):
 
 
 def main():
-    paths = sys.argv[1:] if len(sys.argv) > 1 else ["dump.txt"]
-    header, events = load_events(paths)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("dump", nargs="*", default=["dump.txt"],
+                    help="dump file(s), oldest first (default: dump.txt)")
+    ap.add_argument("--tz", default=None, metavar="ZONE",
+                    help="render timestamps in this zone instead of the local one: "
+                         "an IANA name (Asia/Tokyo) or a fixed offset (+09:00). Use it "
+                         "when the sleeping happened somewhere other than where this "
+                         "machine's clock is set -- travelling without changing it.")
+    args = ap.parse_args()
+    paths = args.dump or ["dump.txt"]
+    try:
+        tz = resolve_tz(args.tz)
+    except ValueError as e:
+        sys.exit(f"error: {e}")
+    header, events = load_events(paths, tz)
 
     if header:
         print(f"Device serial : {header['serial']}")

@@ -49,6 +49,17 @@ Then set up SleepHQ credentials (step 4 below) if you want the upload stage.
 (`./transcend` is a thin wrapper around `pipeline.sh` — same flags, same env
 vars, just a nicer name to type.)
 
+> **On Windows without WSL**, both of those are bash and won't run — see
+> [`packaging/WINDOWS.md`](packaging/WINDOWS.md) for the fresh-machine setup and
+> the equivalent per-stage commands.
+>
+> **Travelling?** The device stores UTC and the tools render it in *this
+> machine's* local zone, so sleeping in another timezone without changing the
+> laptop clock files every night at the wrong time — and sometimes the wrong
+> date. Pass the zone you slept in: `--tz Asia/Tokyo` (or `--tz +09:00`) to both
+> `parse.py` and `sleephq/convert.py`, and keep the laptop on one timezone so
+> the uploader's content-hash dedup keeps working.
+
 That pulls every session currently on the device, converts it to a ResMed/SleepHQ
 tree, and uploads it. It always re‑pulls everything the device is holding (not just
 new nights), but that's cheap and safe: SleepHQ dedups by file hash, so re‑uploading

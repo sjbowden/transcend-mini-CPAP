@@ -72,6 +72,64 @@ class TestDecode(unittest.TestCase):
         self.assertEqual(ev["raw_dt"], "2026-00-01 03:04")
 
 
+class TestTimezoneRendering(unittest.TestCase):
+    """The device stores UTC. Rendering it in this machine's local zone is wrong
+    when the sleeping happened elsewhere and the clock was never changed —
+    a Tokyo night would file as a daytime nap on the wrong date."""
+
+    # 23:00 JST on 15 Oct 2026 == 14:00 UTC the same day.
+    REC = None
+
+    def setUp(self):
+        self.rec = enc(datetime(2026, 10, 15, 14, 0), 1, 120)   # UTC in the record
+
+    def test_fixed_offset(self):
+        ev = parse.decode_event(self.rec, parse.resolve_tz("+09:00"))
+        self.assertEqual(ev["raw_dt"], "2026-10-15 23:00")
+
+    def test_negative_offset_without_colon(self):
+        ev = parse.decode_event(self.rec, parse.resolve_tz("-0700"))
+        self.assertEqual(ev["raw_dt"], "2026-10-15 07:00")
+
+    def test_two_digit_offset(self):
+        ev = parse.decode_event(self.rec, parse.resolve_tz("+08"))
+        self.assertEqual(ev["raw_dt"], "2026-10-15 22:00")
+
+    def test_utc_passthrough(self):
+        ev = parse.decode_event(self.rec, parse.resolve_tz("UTC"))
+        self.assertEqual(ev["raw_dt"], "2026-10-15 14:00")
+
+    def test_iana_name(self):
+        try:
+            tz = parse.resolve_tz("Asia/Tokyo")
+        except ValueError:
+            self.skipTest("no zoneinfo/tzdata on this interpreter")
+        self.assertEqual(parse.decode_event(self.rec, tz)["raw_dt"], "2026-10-15 23:00")
+
+    def test_none_means_machine_local(self):
+        ev = parse.decode_event(self.rec, None)
+        expect = datetime(2026, 10, 15, 14, 0, tzinfo=timezone.utc).astimezone()
+        self.assertEqual(ev["raw_dt"], expect.strftime("%Y-%m-%d %H:%M"))
+
+    def test_bad_specs_are_rejected(self):
+        for bad in ("+9", "+09:0", "Mars/Olympus", "+ab:cd", "09:00"):
+            with self.assertRaises(ValueError, msg=bad):
+                parse.resolve_tz(bad)
+
+    def test_empty_spec_is_local(self):
+        self.assertIsNone(parse.resolve_tz(None))
+        self.assertIsNone(parse.resolve_tz(""))
+
+    def test_load_events_threads_tz_through(self):
+        rec = enc(datetime(2026, 10, 15, 14, 0), 1, 120)
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "dump.txt")
+            open(p, "w").write(f"BLOCK 100 {rec}\n")
+            _, evs = parse.load_events([p], parse.resolve_tz("+09:00"))
+        self.assertEqual(len(evs), 1)
+        self.assertEqual(evs[0]["raw_dt"], "2026-10-15 23:00")
+
+
 class TestHeader(unittest.TestCase):
     def test_parse_header(self):
         serial, firmware = "B1234567", "12.0"
