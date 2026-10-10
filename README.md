@@ -242,6 +242,15 @@ set** (`BRP/PLD/EVE/CSL`), not just `STR.edf` — a partial set fails as *"some 
 missing."* It also sends an explicit `User-Agent`; SleepHQ's Cloudflare front end blocks
 the default `urllib`/`Python-urllib` signature outright.
 
+**Live-validated 2026-10-10** against a real account: every step of the flow
+returned success on a real session — token, `GET /api/v1/me` for the team,
+import creation, all six files, and `process_files`. Two things were wrong
+before that run and are worth knowing if you adapt this:
+- The OAuth call is a **password** grant, so it needs `username` and `password`
+  alongside the client id/secret. The client pair alone returns `invalid_grant`.
+- The credentials file is **JSON** (`client_id`, `client_secret`, `username`,
+  `password`, optional `team_id`), not `KEY=VALUE`.
+
 ## Settings (read & edit)
 
 `settings.py` reads and (carefully) edits the device configuration over the same serial
