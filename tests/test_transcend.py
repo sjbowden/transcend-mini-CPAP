@@ -289,12 +289,14 @@ class TestConvertEndToEnd(unittest.TestCase):
                               os.listdir(os.path.join(out, "DATALOG", day)))
                 self.assertEqual(exts, ["BRP.edf", "CSL.edf", "EVE.edf", "PLD.edf"])
             e = edf.Edf(os.path.join(out, "STR.edf"))
-            self.assertEqual(e.hdr["n_records"], 2)
+            # one record per calendar day, the unused 06-02 included (STR is positional)
+            self.assertEqual(e.hdr["n_records"], 3)
             idx = {s["label"]: i for i, s in enumerate(e.signals)}
-            self.assertEqual(e.signal_phys(idx["Duration"]), [420.0, 90.0])
+            self.assertEqual(e.signal_phys(idx["Duration"]), [420.0, 0.0, 90.0])
+            self.assertEqual(e.signal_phys(idx["MaskEvents"]), [1.0, 0.0, 1.0])
             ahi = e.signal_phys(idx["AHI"])
             self.assertAlmostEqual(ahi[0], 1 / 7, places=1)   # 1 apnea / 7 h
-            self.assertEqual(ahi[1], 0.0)
+            self.assertEqual(ahi[1:], [0.0, 0.0])
 
     def test_min_minutes_zero_keeps_short_session(self):
         with tempfile.TemporaryDirectory() as d:
@@ -308,13 +310,32 @@ class TestConvertEndToEnd(unittest.TestCase):
             e = edf.Edf(os.path.join(out, "STR.edf"))
             idx = {s["label"]: i for i, s in enumerate(e.signals)}
             g = lambda lbl: [round(v, 3) for v in e.signal_phys(idx[lbl])]
-            self.assertEqual(g("S.Mask"), [3, 3])             # --mask code, every record
-            self.assertEqual(g("S.A.MinPress"), [6, 8])       # set events; day-2 fallback = start_pressure
-            self.assertEqual(g("S.A.MaxPress"), [15, 8])
-            self.assertEqual(g("S.EPR.EPREnable"), [2, 1])    # 2 = On, 1 = Off
-            self.assertEqual(g("S.EPR.Level"), [2, 0])
-            self.assertEqual(g("S.RampEnable"), [3, 1])       # 3 = On, 1 = Off
-            self.assertEqual(g("S.RampTime"), [10, 0])        # snapped to 5-min increments
+            # the unused middle day carries day 1's settings forward, as a real device would
+            self.assertEqual(g("S.Mask"), [3, 3, 3])          # --mask code, every record
+            self.assertEqual(g("S.A.MinPress"), [6, 6, 8])    # set events; day-2 fallback = start_pressure
+            self.assertEqual(g("S.A.MaxPress"), [15, 15, 8])
+            self.assertEqual(g("S.EPR.EPREnable"), [2, 2, 1]) # 2 = On, 1 = Off
+            self.assertEqual(g("S.EPR.Level"), [2, 2, 0])
+            self.assertEqual(g("S.RampEnable"), [3, 3, 1])    # 3 = On, 1 = Off
+            self.assertEqual(g("S.RampTime"), [10, 10, 0])    # snapped to 5-min increments
+
+    def test_str_records_are_one_per_consecutive_day(self):
+        # Readers date record i as header start + i days, so a gap between used nights
+        # must be filled; otherwise 06-03 is filed as 06-02 (the 2026-10-17 SleepHQ bug).
+        with tempfile.TemporaryDirectory() as d:
+            out, _ = self._run(d)
+            e = edf.Edf(os.path.join(out, "STR.edf"))
+            self.assertEqual(e.hdr["startdate"], "01.06.26")   # dd.mm.yy
+            idx = {s["label"]: i for i, s in enumerate(e.signals)}
+            epoch = datetime(1970, 1, 1)
+            dates = [(epoch + timedelta(days=v)).date() for v in e.signal_phys(idx["Date"])]
+            self.assertEqual(dates, [datetime(2026, 6, k).date() for k in (1, 2, 3)])
+            # each used day's DATALOG folder lines up with its record's position
+            used = [dates[i].strftime("%Y%m%d") for i, v in
+                    enumerate(e.signal_phys(idx["Duration"])) if v > 0]
+            self.assertEqual(used, sorted(os.listdir(os.path.join(out, "DATALOG"))))
+            slots = len(e.signal_phys(idx["MaskOn"])) // 3
+            self.assertEqual(e.signal_phys(idx["MaskOn"])[slots:2 * slots], [-1.0] * slots)
 
     def test_ramp_curve_starts_at_ramp_start_pressure(self):
         # Locks the RampStart subdata encoding: 40 -> 4.0 cmH2O (x10). The day-1 pressure

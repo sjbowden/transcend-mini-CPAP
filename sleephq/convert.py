@@ -280,8 +280,20 @@ def vent_compensate(raw_leak_f, press_f, leak_pts, start):
     return f
 
 
+def str_days(days_sorted):
+    """Every calendar day from the first used day to the last. STR.edf is positional --
+    readers (SleepHQ, OSCAR) date record i as the header start + i days and ignore its
+    Date field -- so a night with no use still needs a record, or every later night is
+    filed that many days early. A real AirSense 11 writes one record per day too."""
+    first, last = days_sorted[0][0], days_sorted[-1][0]
+    return [first + timedelta(days=k) for k in range((last - first).days + 1)]
+
+
 def build_str(days_sorted, out_path, serial, mask=2):
-    """Write STR.edf by cloning the template's last record and overriding fields."""
+    """Write STR.edf by cloning the template's last record and overriding fields.
+
+    One record per calendar day (see str_days); unused days are zero-usage records
+    that carry the previous day's settings forward."""
     import struct
     tmpl = edflib.Edf(TEMPLATE)              # validated reader (gain/offset, correct field order)
     # the record packer below writes all samples but the last, then appends the CRC
@@ -314,12 +326,36 @@ def build_str(days_sorted, out_path, serial, mask=2):
     OFF = ["S.HumEnable", "S.ClimateControl", "S.TempEnable", "HeatedTube", "Humidifier"]
     SPO2 = ["SpO2.50", "SpO2.95", "SpO2.Max", "SpO2Thresh"]
 
+    def pack(rec):
+        body = struct.pack("<%dh" % (rec_samps - 1), *rec[:-1])
+        crc = edflib.crc_ccitt(body)
+        return body + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
+
+    used = dict(days_sorted)
+    all_days = str_days(days_sorted)
+    first_day = all_days[0]
+    mon_off, slots = sample_off["MaskOn"][0], sample_off["MaskOn"][1]
+    moff_off = sample_off["MaskOff"][0]
     records = bytearray()
     warnings = []
-    first_day = None
-    for day, sessions in days_sorted:
-        if first_day is None:
-            first_day = day
+    prev = None
+    for day in all_days:
+        sessions = used.get(day)
+        if not sessions:
+            # no use this day: zero usage, no mask on/off, previous day's settings
+            rec = list(donor)
+            for lbl, (off, ns, _, _, _) in sample_off.items():
+                if lbl.startswith("S."):
+                    rec[off:off + ns] = prev[off:off + ns]
+            rec[sample_off["Date"][0]] = enc("Date", (datetime(day.year, day.month, day.day) - EPOCH).days)
+            for k in range(slots):
+                rec[mon_off + k] = -1
+                rec[moff_off + k] = -1
+            for lbl in SPO2:
+                rec[sample_off[lbl][0]] = -1
+            records += pack(rec)
+            prev = rec
+            continue
         rec = list(donor)
         def clamp(label, val, lo=-32768, hi=32767):
             c = max(lo, min(hi, val))
@@ -343,8 +379,6 @@ def build_str(days_sorted, out_path, serial, mask=2):
         setv("Duration", round(total_dur))
         setv("MaskEvents", len(sessions))
         # MaskOn/MaskOff arrays (minutes after noon), pad -1
-        mon_off, slots = sample_off["MaskOn"][0], sample_off["MaskOn"][1]
-        moff_off = sample_off["MaskOff"][0]
         for k in range(slots):
             rec[mon_off + k] = -1
             rec[moff_off + k] = -1
@@ -416,9 +450,8 @@ def build_str(days_sorted, out_path, serial, mask=2):
         for lbl in SPO2:
             rec[sample_off[lbl][0]] = -1
 
-        body = struct.pack("<%dh" % (rec_samps - 1), *rec[:-1])
-        crc = edflib.crc_ccitt(body)
-        records += body + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
+        records += pack(rec)
+        prev = rec
 
     # rewrite header start date/time, n_records, recording serial
     sd = datetime(first_day.year, first_day.month, first_day.day, 12)
@@ -427,7 +460,7 @@ def build_str(days_sorted, out_path, serial, mask=2):
                               f"X X X SRN={serial} MID=46 VID=3", 80)
     head[168:176] = edflib.fld(sd.strftime("%d.%m.%y"), 8)
     head[176:184] = edflib.fld("12.00.00", 8)
-    head[236:244] = edflib.fld(str(len(days_sorted)), 8)
+    head[236:244] = edflib.fld(str(len(all_days)), 8)
     with open(out_path, "wb") as f:
         f.write(bytes(head) + sighdr + records)
     return warnings
@@ -562,7 +595,7 @@ def main(argv=None):
     if n_open:
         print(f"Note          : {n_open} session(s) had no EndTherapy event (truncated log?) "
               "— ended at their last logged event")
-    print(f"Wrote         : STR.edf ({len(days_sorted)} day-records), {n_eve} EVE files, Identification.json")
+    print(f"Wrote         : STR.edf ({len(str_days(days_sorted))} day-records), {n_eve} EVE files, Identification.json")
     print(f"Output dir    : {os.path.abspath(args.out)}")
     if warnings:
         print(f"\n{len(warnings)} value warning(s) (possible unit/scale issue):")
