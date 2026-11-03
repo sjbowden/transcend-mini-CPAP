@@ -61,18 +61,23 @@ python3 settings.py --show
 `sessions.csv` is the per-night summary (usage, AHI, apneas/hypopneas, min/max
 pressure, leak) — the natural thing to feed into your own dashboard.
 
-## 5. Full pipeline (optional, for SleepHQ)
+## 5. Full pipeline (pull → convert → analyze)
 
 ```sh
-./pipeline.sh --no-upload        # pull + convert to a ResMed/SleepHQ SD tree
-./pipeline.sh                    # + upload to SleepHQ
-PORT=/dev/cu.usbserial-XXXX ./pipeline.sh --no-upload   # explicit port
+./pipeline.sh --no-analyze       # pull + convert to a ResMed-format SD tree
+./pipeline.sh                    # + run ~/projects/cpap/cpap_analyzer.py -> analysis/
+PORT=/dev/cu.usbserial-XXXX ./pipeline.sh --no-analyze   # explicit port
 ```
 
-`pipeline.sh` is now OS-agnostic — the pull stage calls `collect.py`, which
-picks the serial backend itself.
+`pipeline.sh` is OS-agnostic — the pull stage calls `collect.py`, which
+picks the serial backend itself. The analyze stage needs a Python with pandas
+and matplotlib (`ANALYZER_PYTHON=`, default `python3`) and the analyzer script
+(`CPAP_ANALYZER=`, default `~/projects/cpap/cpap_analyzer.py`).
 
-Uploading needs a SleepHQ API client. In SleepHQ, go to Account Settings and
+### Optional: uploading to SleepHQ by hand
+
+No longer part of the pipeline. `python3 sleephq/upload.py --data-dir sleephq/out --all`
+still works if you want it, and needs a SleepHQ API client. In SleepHQ, go to Account Settings and
 create one to get a Client ID and Client Secret, then create
 `~/.sleephq_credentials` (`chmod 600`) as JSON:
 

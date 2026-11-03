@@ -5,6 +5,7 @@ events.csv
 sessions.csv
 *.dump
 sleephq/out/
+analysis/
 
 # Python
 __pycache__/

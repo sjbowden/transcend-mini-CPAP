@@ -29,10 +29,10 @@ needs an elevated PowerShell. Neither does anything else in this file:
 serial-port access, `-ExecutionPolicy Bypass` (per-process) and the PyInstaller
 build are all ordinary-user operations.
 
-For the upload stage, credentials go in `%USERPROFILE%\.sleephq_credentials`
-(i.e. `C:\Users\<you>\.sleephq_credentials`) — `~` expands there on Windows.
-Same JSON as everywhere else; the `chmod 600` the other docs mention has no
-Windows equivalent, so rely on the file being inside your user profile.
+For the analyze stage, also `pip install pandas matplotlib` and copy the
+ResMed analyzer (`cpap_analyzer.py` from `~/projects/cpap`) onto the machine;
+set `CPAP_ANALYZER` to its path unless it is at
+`%USERPROFILE%\projects\cpap\cpap_analyzer.py`.
 
 ## 1. The routine, on Windows
 
@@ -43,8 +43,8 @@ without WSL or Git Bash. Run the stages directly (or use the GUI in section 2):
 python collect.py --port auto --out dump.txt
 python parse.py dump.txt
 python sleephq\convert.py dump.txt --out sleephq\out
-python sleephq\upload.py --data-dir sleephq\out --all --dry-run
-python sleephq\upload.py --data-dir sleephq\out --all
+mkdir analysis
+python $env:CPAP_ANALYZER --data-dir sleephq\out --output-dir analysis
 ```
 
 `--port auto` finds the device by USB VID:PID, so you rarely need `--port COM3`.
@@ -55,7 +55,7 @@ The device stores UTC and both `parse.py` and `convert.py` render it in **this
 machine's** local zone by default. If you sleep in another timezone without
 changing the laptop clock, every night lands at the wrong time of day and
 sometimes the wrong date — a 23:00 Tokyo night shows up as 07:00 the same
-morning on a US-Pacific clock, which SleepHQ then files as a daytime nap.
+morning on a US-Pacific clock, which the analyzer then counts as a daytime nap.
 
 Pass the zone you actually slept in:
 
@@ -73,10 +73,9 @@ python sleephq\convert.py dump.txt --out out-jp --tz +09:00 --since 2026-11-02 -
 python sleephq\convert.py dump.txt --out out-tw --tz +08:00 --since 2026-11-11 --until 2026-11-18
 ```
 
-Keep the laptop on one timezone throughout. The uploader deduplicates on
-`MD5(file content + filename)` and both depend on the rendered timestamp, so
-converting the same nights under two different zones produces two different
-sets of files — duplicate nights in SleepHQ rather than a no-op re-upload.
+Keep the laptop on one timezone throughout. File names and contents depend on
+the rendered timestamp, so converting the same nights under two different zones
+into one folder produces two sets of files — duplicate nights in the analysis.
 
 ## 2. Plain Python GUI (no build at all)
 
@@ -111,17 +110,15 @@ Notes:
   positives. Fine for personal use; distribution would need a code-signing
   certificate.
 - **Where the exe keeps its files:** `%LOCALAPPDATA%\TranscendSync\` (`dump.txt`
-  and `sleephq\out\`), shown in the first lines of the log. Not beside the exe:
+  `sleephq\out\` and `analysis\`), shown in the first lines of the log. Not beside the exe:
   a one-file exe unpacks into a temporary `%TEMP%\_MEIxxxx` folder that Windows
   deletes when the app closes, so files kept there vanished with the window
   (fixed 2026-11-02). Run from source, files still sit beside `app.py`.
-- **Upload from the frozen exe** runs the bundled `sleephq/upload.py` inside the
-  exe (it is standard-library only), so no Python install is needed; the log's
-  third line reads `uploader: built in`. Setting `SLEEPHQ_UPLOADER` to a script
-  path still makes it run that script with `python` on PATH instead.
-- **SleepHQ credentials** are read from `%USERPROFILE%\.sleephq_credentials`
-  (the same JSON as on Linux/macOS; see `sleephq/upload.py`). Restrict it to
-  your account: `icacls $env:USERPROFILE\.sleephq_credentials /inheritance:r /grant:r "${env:USERNAME}:F"`.
+- **Analyze from the frozen exe** is the one button that still needs Python:
+  it runs the separate ResMed analyzer (pandas + matplotlib, too heavy to
+  bundle) with `python` from PATH. Pull, Convert and Show settings need
+  nothing installed. The log's `analyzer:` line shows the script it will run
+  and says NOT FOUND if it isn't there; set `CPAP_ANALYZER` to its path.
 - **Smart App Control** (Windows 11) let the unsigned exe run on the build
   machine (2026-11-02, enforcing mode, no Code Integrity blocks). Another PC
   may decide differently; if it blocks the exe, run `python app.py` instead.

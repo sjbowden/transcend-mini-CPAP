@@ -37,9 +37,14 @@
     folder, which is deleted on exit, so a Pull vanished with the window (now
     `%LOCALAPPDATA%\TranscendSync`). And Upload looked for an unbundled `upload.py`, to
     run with whatever `python` was on PATH, which on a clean PC is the Microsoft Store
-    placeholder (now the bundled module runs in-process).
-  - ⬜ **Not yet checked:** a real Pull and Upload from the exe. Pull needs the device on
-    that PC; Upload needs `%USERPROFILE%\.sleephq_credentials` there.
+    placeholder.
+  - **2026-11-02: SleepHQ dropped.** Scott now analyzes locally with
+    `~/projects/cpap/cpap_analyzer.py`, so the app's Upload button became **Analyze**
+    (runs the analyzer on `sleephq/out` into a separate `analysis/` folder) and
+    `pipeline.sh`'s upload stage became an analyze stage. `sleephq/upload.py` stays as a
+    standalone tool. The exe on dejavu predates this and still has Upload — rebuild it.
+  - ⬜ **Not yet checked:** a real Pull from the exe (needs the device on that PC), and
+    Analyze from a rebuilt exe (needs Python + pandas + matplotlib and the analyzer there).
 
 ## From the vendor manuals (see docs/NOTES.md for cites)
 
@@ -64,7 +69,7 @@
   APAP and CPAP; tests updated (old min-based rejection replaced with the now-allowed low-min case
   + a start-driven rejection). Validated before any device I/O.
 
-## Enhancing the SleepHQ upload
+## Enhancing the converted data (written for SleepHQ, which is no longer used)
 
 What the converter (`sleephq/convert.py`) emits today and how to make SleepHQ show
 more of what the Transcend actually records. Legend:

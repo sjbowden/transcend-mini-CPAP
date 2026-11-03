@@ -7,7 +7,7 @@ Python and Homebrew's python-tk) and drives the same pure-Python CLI stages.
 Buttons map 1:1 onto the CLI stages (see README.md):
     Pull        collect.py        device -> dump.txt
     Convert     sleephq/convert   dump.txt -> ResMed SD tree (sleephq/out)
-    Upload      SleepHQ uploader  sleephq/out -> SleepHQ (external tool)
+    Analyze     cpap_analyzer.py  sleephq/out -> charts + CSV (your local analyzer)
     Settings    settings.py       read-only view of the device configuration
 
 Run with a normal Python (pip install pyserial) on Windows, or see
@@ -25,7 +25,6 @@ import shutil
 import subprocess
 import sys
 import threading
-from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -37,40 +36,44 @@ import convert as tconvert       # noqa: E402
 import transport as ttransport   # noqa: E402
 from transport import TransportError  # noqa: E402
 
-def app_paths(frozen, here, localappdata, env_uploader):
-    """Where the app keeps the dump and the converted tree, and which uploader
-    it runs (None = the bundled upload module, in-process).
+def app_paths(frozen, here, localappdata, env_analyzer, home=None):
+    """Where the app keeps the dump, the converted tree and the analysis
+    output, and which analyzer script Analyze runs.
 
     A one-file PyInstaller exe unpacks into a temporary %TEMP%\\_MEIxxxx folder
     that is deleted when the app closes, and __file__ points into it, so the
-    frozen app keeps its data in %LOCALAPPDATA%\\TranscendSync instead. It also
-    can't run sleephq/upload.py as a script (not bundled, and no real Python is
-    guaranteed on PATH), so it imports the uploader. Run from source, nothing
-    changes: files sit beside app.py and the uploader runs as a script.
-    SLEEPHQ_UPLOADER, when set, always wins."""
+    frozen app keeps its data in %LOCALAPPDATA%\\TranscendSync instead. Run from
+    source, files sit beside app.py.
+
+    The analyzer is the separate ResMed analyzer (~/projects/cpap), which needs
+    pandas + matplotlib, so it always runs as a script under a real Python.
+    CPAP_ANALYZER, when set, wins. Its output goes to its own "analysis" folder,
+    never the analyzer's default (its own directory), so a Transcend run can't
+    overwrite the ResMed charts and CSV."""
+    home = home or os.path.expanduser("~")
     if frozen:
-        data = os.path.join(localappdata or os.path.expanduser("~"), "TranscendSync")
-        uploader = env_uploader or None
+        data = os.path.join(localappdata or home, "TranscendSync")
     else:
         data = here
-        uploader = env_uploader or os.path.join(here, "sleephq", "upload.py")
     return {"dump": os.path.join(data, "dump.txt"),
             "out": os.path.join(data, "sleephq", "out"),
-            "uploader": uploader}
+            "analysis": os.path.join(data, "analysis"),
+            "analyzer": env_analyzer or os.path.join(home, "projects", "cpap", "cpap_analyzer.py")}
 
 
 FROZEN = getattr(sys, "frozen", False)
 _PATHS = app_paths(FROZEN, HERE, os.environ.get("LOCALAPPDATA"),
-                   os.environ.get("SLEEPHQ_UPLOADER"))
+                   os.environ.get("CPAP_ANALYZER"))
 DUMP = _PATHS["dump"]
 OUT = _PATHS["out"]
-UPLOADER = _PATHS["uploader"]
+ANALYSIS = _PATHS["analysis"]
+ANALYZER = _PATHS["analyzer"]
 if FROZEN:
     os.makedirs(os.path.dirname(DUMP), exist_ok=True)
 
 
 def python_exe():
-    """Interpreter for the external uploader. A frozen .exe is not a Python,
+    """Interpreter for the external analyzer. A frozen .exe is not a Python,
     so fall back to whatever python is on PATH."""
     if not getattr(sys, "frozen", False):
         return sys.executable
@@ -98,8 +101,8 @@ class App:
 
         self.buttons = []
         for label, fn in [("Pull", self.do_pull), ("Convert", self.do_convert),
-                          ("Upload", self.do_upload),
-                          ("Pull → Convert → Upload", self.do_all),
+                          ("Analyze", self.do_analyze),
+                          ("Pull → Convert → Analyze", self.do_all),
                           ("Show settings", self.do_settings)]:
             b = ttk.Button(top, text=label, command=lambda f=fn: self.run_task(f))
             b.pack(side="left", padx=2)
@@ -114,11 +117,9 @@ class App:
         root.after(100, self._pump)
         self.log(f"dump:     {DUMP}")
         self.log(f"output:   {OUT}")
-        if UPLOADER is None:
-            self.log("uploader: built in")
-        else:
-            self.log(f"uploader: {UPLOADER}"
-                     + ("" if os.path.exists(UPLOADER) else "   (NOT FOUND — set SLEEPHQ_UPLOADER)"))
+        self.log(f"analysis: {ANALYSIS}")
+        self.log(f"analyzer: {ANALYZER}"
+                 + ("" if os.path.exists(ANALYZER) else "   (NOT FOUND — set CPAP_ANALYZER)"))
         self.log(f"port:     auto -> {self._detected_port()}")
         self.log("Ready. Device settings are view-only here; use settings.py to change them.\n")
 
@@ -195,32 +196,31 @@ class App:
         self.log(f"==> Converting -> {OUT} ...")
         self._captured(tconvert.main, [DUMP, "--out", OUT])
 
-    def do_upload(self):
-        args = ["--data-dir", OUT, "--all",
-                "--import-name", f"Transcend (app, {date.today():%Y-%m-%d})"]
-        if UPLOADER is None:                 # frozen: the bundled module, no Python needed
-            import upload as tupload
-            self.log("==> Uploading to SleepHQ ...")
-            rc = self._captured(tupload.main, args)
-        else:
-            if not os.path.exists(UPLOADER):
-                self.log(f"Uploader not found at {UPLOADER} — set SLEEPHQ_UPLOADER.")
-                return
-            self.log("==> Uploading to SleepHQ ...")
-            proc = subprocess.Popen([python_exe(), UPLOADER] + args,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            for line in proc.stdout:
-                self.log(line.rstrip())
-            rc = proc.wait()
+    def do_analyze(self):
+        if not os.path.isdir(OUT):
+            self.log(f"No converted data at {OUT} — Convert first.")
+            return
+        if not os.path.exists(ANALYZER):
+            self.log(f"Analyzer not found at {ANALYZER} — set CPAP_ANALYZER.")
+            return
+        os.makedirs(ANALYSIS, exist_ok=True)
+        self.log(f"==> Analyzing -> {ANALYSIS} ...")
+        proc = subprocess.Popen([python_exe(), ANALYZER, "--data-dir", OUT,
+                                 "--output-dir", ANALYSIS],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            self.log(line.rstrip())
+        rc = proc.wait()
         if rc:
-            self.log(f"Upload FAILED (exit {rc}).")
+            self.log(f"Analyze FAILED (exit {rc}) — the analyzer needs a Python "
+                     "with pandas and matplotlib.")
         else:
-            self.log("Upload complete.")
+            self.log(f"Analysis complete: charts and cpap_data.csv in {ANALYSIS}")
 
     def do_all(self):
         self.do_pull()
         self.do_convert()
-        self.do_upload()
+        self.do_analyze()
 
     def do_settings(self):
         self.log(f"==> Reading settings from {self.port.get()} (read-only) ...")

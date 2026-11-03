@@ -1,63 +1,66 @@
-"""Tests for where app.py keeps its files, and how it uploads, when frozen.
+"""Tests for where app.py keeps its files, and how Analyze runs the analyzer.
 
 A one-file PyInstaller exe unpacks itself into a temporary %TEMP%\\_MEIxxxx
 folder that Windows deletes when the app closes, and __file__ points into it.
 So the frozen app must not keep dump.txt or the converted tree beside
-__file__ (a Pull would vanish with the window), and it cannot run
-sleephq/upload.py as a script (that file isn't bundled, and the "python on
-PATH" it would need is usually the Microsoft Store placeholder). It keeps its
-data in %LOCALAPPDATA%\\TranscendSync and runs the uploader in-process.
+__file__ (a Pull would vanish with the window); it keeps its data in
+%LOCALAPPDATA%\\TranscendSync.
+
+Analyze runs the separate ResMed analyzer (~/projects/cpap/cpap_analyzer.py)
+on the converted tree, and must send its output to the app's own "analysis"
+folder: the analyzer's default output folder is its own directory, where the
+ResMed charts and CSV live.
 
 Run:  python3 -m unittest discover -s tests
 """
 import os
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "sleephq"))
 
 import app  # noqa: E402
-import upload  # noqa: E402
 
 HERE = os.path.join("C:\\", "Temp", "_MEI1234")          # where a frozen __file__ points
 LOCAL = os.path.join("C:\\", "Users", "scott", "AppData", "Local")
+HOME = os.path.join("C:\\", "Users", "scott")
 
 
 class TestAppPaths(unittest.TestCase):
     def test_frozen_data_lives_in_localappdata_not_the_unpack_folder(self):
-        p = app.app_paths(frozen=True, here=HERE, localappdata=LOCAL, env_uploader=None)
+        p = app.app_paths(frozen=True, here=HERE, localappdata=LOCAL, env_analyzer=None, home=HOME)
         data = os.path.join(LOCAL, "TranscendSync")
         self.assertEqual(p["dump"], os.path.join(data, "dump.txt"))
         self.assertEqual(p["out"], os.path.join(data, "sleephq", "out"))
+        self.assertEqual(p["analysis"], os.path.join(data, "analysis"))
         self.assertFalse(p["dump"].startswith(HERE))
 
     def test_frozen_without_localappdata_falls_back_to_home(self):
-        p = app.app_paths(frozen=True, here=HERE, localappdata=None, env_uploader=None)
-        self.assertEqual(p["dump"], os.path.join(os.path.expanduser("~"), "TranscendSync", "dump.txt"))
+        p = app.app_paths(frozen=True, here=HERE, localappdata=None, env_analyzer=None, home=HOME)
+        self.assertEqual(p["dump"], os.path.join(HOME, "TranscendSync", "dump.txt"))
 
     def test_running_from_source_keeps_files_beside_the_app(self):
-        p = app.app_paths(frozen=False, here=ROOT, localappdata=LOCAL, env_uploader=None)
+        p = app.app_paths(frozen=False, here=ROOT, localappdata=LOCAL, env_analyzer=None, home=HOME)
         self.assertEqual(p["dump"], os.path.join(ROOT, "dump.txt"))
         self.assertEqual(p["out"], os.path.join(ROOT, "sleephq", "out"))
-        self.assertEqual(p["uploader"], os.path.join(ROOT, "sleephq", "upload.py"))
+        self.assertEqual(p["analysis"], os.path.join(ROOT, "analysis"))
 
-    def test_frozen_uploads_in_process_unless_overridden(self):
-        p = app.app_paths(frozen=True, here=HERE, localappdata=LOCAL, env_uploader=None)
-        self.assertIsNone(p["uploader"])      # None = the bundled upload module
-        p = app.app_paths(frozen=True, here=HERE, localappdata=LOCAL, env_uploader="D:\\up.py")
-        self.assertEqual(p["uploader"], "D:\\up.py")
+    def test_default_analyzer_is_the_cpap_repo(self):
+        p = app.app_paths(frozen=False, here=ROOT, localappdata=None, env_analyzer=None, home=HOME)
+        self.assertEqual(p["analyzer"], os.path.join(HOME, "projects", "cpap", "cpap_analyzer.py"))
 
-    def test_override_also_wins_from_source(self):
-        p = app.app_paths(frozen=False, here=ROOT, localappdata=None, env_uploader="/x/up.py")
-        self.assertEqual(p["uploader"], "/x/up.py")
+    def test_env_override_wins(self):
+        for frozen in (True, False):
+            p = app.app_paths(frozen=frozen, here=ROOT, localappdata=LOCAL,
+                              env_analyzer="/x/an.py", home=HOME)
+            self.assertEqual(p["analyzer"], "/x/an.py")
 
 
 class _FakeApp:
-    """Just enough of App for do_upload: a log and the capture helper."""
-    _captured = app.App._captured
-
     def __init__(self):
         self.lines = []
 
@@ -65,37 +68,65 @@ class _FakeApp:
         self.lines.append(line)
 
 
-class TestInProcessUpload(unittest.TestCase):
+class TestAnalyze(unittest.TestCase):
+    """Runs do_analyze against a stand-in analyzer script that records its
+    argv, so the real pandas/matplotlib analyzer isn't needed."""
+
     def setUp(self):
-        self.saved = (app.UPLOADER, app.OUT, upload.main)
-        app.UPLOADER, app.OUT = None, os.path.join(LOCAL, "TranscendSync", "sleephq", "out")
+        self.tmp = tempfile.TemporaryDirectory()
+        t = self.tmp.name
+        self.out = os.path.join(t, "out")
+        self.analysis = os.path.join(t, "analysis")
+        self.argv_file = os.path.join(t, "argv.txt")
+        self.script = os.path.join(t, "fake_analyzer.py")
+        self.patches = [mock.patch.object(app, "OUT", self.out),
+                        mock.patch.object(app, "ANALYSIS", self.analysis),
+                        mock.patch.object(app, "ANALYZER", self.script)]
+        for p in self.patches:
+            p.start()
 
     def tearDown(self):
-        app.UPLOADER, app.OUT, upload.main = self.saved
+        for p in self.patches:
+            p.stop()
+        self.tmp.cleanup()
 
-    def _run(self, rc):
-        seen = {}
+    def _write_analyzer(self, rc):
+        with open(self.script, "w") as f:
+            f.write("import sys\n"
+                    f"open({self.argv_file!r}, 'w').write('\\n'.join(sys.argv[1:]))\n"
+                    "print('Total days analyzed: 2')\n"
+                    f"sys.exit({rc})\n")
 
-        def fake_main(argv):
-            seen["argv"] = argv
-            print("uploading 3 files")
-            print("a warning", file=sys.stderr)
-            return rc
-        upload.main = fake_main
+    def test_runs_on_the_converted_tree_into_the_analysis_folder(self):
+        os.makedirs(self.out)
+        self._write_analyzer(0)
         fa = _FakeApp()
-        app.App.do_upload(fa)
-        return seen, fa.lines
+        app.App.do_analyze(fa)
+        argv = open(self.argv_file).read().split("\n")
+        self.assertEqual(argv, ["--data-dir", self.out, "--output-dir", self.analysis])
+        self.assertTrue(os.path.isdir(self.analysis))
+        self.assertIn("Total days analyzed: 2", fa.lines)
+        self.assertTrue(fa.lines[-1].startswith("Analysis complete"))
 
-    def test_runs_the_bundled_uploader_on_the_converted_tree(self):
-        seen, lines = self._run(0)
-        self.assertEqual(seen["argv"][:3], ["--data-dir", app.OUT, "--all"])
-        self.assertIn("uploading 3 files", lines)
-        self.assertIn("a warning", lines)          # stderr reaches the log too
-        self.assertEqual(lines[-1], "Upload complete.")
+    def test_a_failing_analyzer_is_reported(self):
+        os.makedirs(self.out)
+        self._write_analyzer(3)
+        fa = _FakeApp()
+        app.App.do_analyze(fa)
+        self.assertTrue(fa.lines[-1].startswith("Analyze FAILED (exit 3)"))
 
-    def test_a_failing_upload_is_reported(self):
-        _, lines = self._run(2)
-        self.assertEqual(lines[-1], "Upload FAILED (exit 2).")
+    def test_needs_converted_data_first(self):
+        self._write_analyzer(0)
+        fa = _FakeApp()
+        app.App.do_analyze(fa)
+        self.assertIn("Convert first", fa.lines[-1])
+        self.assertFalse(os.path.exists(self.argv_file))
+
+    def test_missing_analyzer_is_reported(self):
+        os.makedirs(self.out)
+        fa = _FakeApp()
+        app.App.do_analyze(fa)
+        self.assertIn("set CPAP_ANALYZER", fa.lines[-1])
 
 
 if __name__ == "__main__":
