@@ -1,42 +1,43 @@
 #!/usr/bin/env bash
-# pipeline.sh — end-to-end Transcend -> local analysis.
+# pipeline.sh — end-to-end Transcend -> the cpap repo (SleepHQ Local).
 #
-# Pulls the device's event log over USB, converts it to a ResMed-format SD-card
-# tree, and runs the ResMed analyzer (~/projects/cpap/cpap_analyzer.py) on it.
-# Run the whole thing, or skip stages.
+# Pulls the device's event log over USB and hands it to the cpap repo's
+# transcend_import.py (~/projects/cpap), which stores the dump in
+# transcend/dumps/ and refreshes SleepHQ Local, where Transcend nights show
+# beside the ResMed ones. Run the whole thing, or skip stages.
 #
-#   ./pipeline.sh                 # pull -> convert -> analyze (all data on the device)
-#   ./pipeline.sh --no-analyze    # pull + convert only (inspect sleephq/out first)
-#   ./pipeline.sh --no-pull       # reuse the existing dump.txt (skip the device)
-#   ./pipeline.sh --no-convert    # skip the convert stage (re-analyze existing out/)
+#   ./pipeline.sh                 # pull -> import
+#   ./pipeline.sh --no-pull       # import the existing dump.txt (skip the device)
+#   ./pipeline.sh --no-import     # pull only
+#   ./pipeline.sh --convert       # also write the ResMed-format tree (sleephq/out)
+#   SLEPT_TZ=Asia/Tokyo SLEPT_SINCE="2026-10-16 17:00" ./pipeline.sh
+#                                 # travelling: zone slept in, and (first import
+#                                 # there) when you arrived, local time
 #   PORT=/dev/cu.usbserial-XX ./pipeline.sh   # explicit port (default: auto-detect)
-#   MASK=3 ./pipeline.sh          # ResMed mask-type code written into the STR record
-#   CPAP_ANALYZER=/path/to/cpap_analyzer.py ./pipeline.sh
-#   PYTHON=/path/to/python3 ./pipeline.sh   # override interpreter (see below)
+#   MASK=3 ./pipeline.sh --convert            # ResMed mask-type code for the STR record
+#   CPAP_REPO=/path/to/cpap ./pipeline.sh     # default ~/projects/cpap
+#   PYTHON=/path/to/python3 ./pipeline.sh     # override interpreter (see below)
 #
-# Output: charts + cpap_data.csv in ./analysis — never the analyzer's own
-# directory, so the ResMed results there are left alone.
-#
-# Requires: Python 3 with pyserial (macOS/Linux) or Windows/WSL, the device on
-# USB, and (for analyze) pandas + matplotlib. The pull stage goes through
-# collect.py, which picks the serial backend itself (pyserial on macOS/Linux,
-# the powershell bridge for a COM port under WSL) — so this script is the same
-# on every OS. Uses ./.venv/bin/python3 automatically if present (that's
-# normally where pyserial is installed); override with PYTHON=. The analyzer
-# runs under ANALYZER_PYTHON (default python3), since the venv usually has
-# pyserial but not pandas.
+# Requires: Python 3 with pyserial (macOS/Linux) or Windows/WSL, and the device
+# on USB. The pull stage goes through collect.py, which picks the serial
+# backend itself (pyserial on macOS/Linux, the powershell bridge for a COM port
+# under WSL) — so this script is the same on every OS. Uses ./.venv/bin/python3
+# automatically if present (that's normally where pyserial is installed);
+# override with PYTHON=. The import runs under IMPORT_PYTHON (default python3,
+# which needs numpy, pandas and matplotlib), with TRANSCEND_REPO set to this
+# checkout so it decodes with this repo's parse.py.
 #
 # Uploading to SleepHQ is no longer part of the pipeline; sleephq/upload.py
-# still works standalone if ever needed.
+# still works standalone on a --convert tree if ever needed.
 set -euo pipefail
 
 PORT="${PORT:-auto}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DUMP="$HERE/dump.txt"
 OUT="$HERE/sleephq/out"
-ANALYSIS="$HERE/analysis"
-ANALYZER="${CPAP_ANALYZER:-$HOME/projects/cpap/cpap_analyzer.py}"
-ANALYZER_PYTHON="${ANALYZER_PYTHON:-python3}"
+CPAP_REPO="${CPAP_REPO:-$HOME/projects/cpap}"
+IMPORTER="$CPAP_REPO/transcend_import.py"
+IMPORT_PYTHON="${IMPORT_PYTHON:-python3}"
 # Prefer a venv sitting next to this script (where pyserial actually lives)
 # over whatever "python3" happens to resolve to on PATH — a bare `python3`
 # with no pyserial makes port "auto" fail with the same error as "no device
@@ -47,16 +48,16 @@ else
   PYTHON="${PYTHON:-python3}"
 fi
 
-pull=1 convert=1 analyze=1
+pull=1 convert=0 import=1
 # bash < 4.4 (macOS still ships 3.2) treats "$@" as unbound under `set -u`
 # when there are no positional parameters, so guard the loop -- `./transcend`
 # with no arguments is the common case.
 for a in ${@+"$@"}; do
   case "$a" in
     --no-pull)    pull=0 ;;
-    --no-convert) convert=0 ;;
-    --no-analyze) analyze=0 ;;
-    -h|--help)    sed -n '2,30p' "$0"; exit 0 ;;
+    --convert)    convert=1 ;;
+    --no-import)  import=0 ;;
+    -h|--help)    sed -n '2,32p' "$0"; exit 0 ;;
     *) echo "unknown arg: $a (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -73,16 +74,17 @@ if [ "$convert" = 1 ]; then
   echo "==> [2/3] Converting -> $OUT ..."
   "$PYTHON" "$HERE/sleephq/convert.py" "$DUMP" --out "$OUT" ${MASK:+--mask "$MASK"}
 else
-  echo "==> [2/3] Convert skipped."
+  echo "==> [2/3] Convert skipped (pass --convert for the ResMed-format tree)."
 fi
 
-if [ "$analyze" = 1 ]; then
-  echo "==> [3/3] Analyzing -> $ANALYSIS ..."
-  [ -f "$ANALYZER" ] || { echo "  ERROR: analyzer not found at $ANALYZER (set CPAP_ANALYZER)" >&2; exit 1; }
-  mkdir -p "$ANALYSIS"
-  "$ANALYZER_PYTHON" "$ANALYZER" --data-dir "$OUT" --output-dir "$ANALYSIS"
+if [ "$import" = 1 ]; then
+  echo "==> [3/3] Importing into $CPAP_REPO ..."
+  [ -f "$IMPORTER" ] || { echo "  ERROR: importer not found at $IMPORTER (set CPAP_REPO)" >&2; exit 1; }
+  ( cd "$CPAP_REPO" && TRANSCEND_REPO="${TRANSCEND_REPO:-$HERE}" "$IMPORT_PYTHON" "$IMPORTER" "$DUMP" \
+      ${SLEPT_TZ:+--tz "$SLEPT_TZ"} ${SLEPT_SINCE:+--since "$SLEPT_SINCE"} )
+  echo "  Commit transcend/ in $CPAP_REPO to keep the dump."
 else
-  echo "==> [3/3] Analyze skipped."
+  echo "==> [3/3] Import skipped."
 fi
 
 echo "==> Pipeline complete."

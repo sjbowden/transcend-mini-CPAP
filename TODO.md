@@ -38,12 +38,13 @@
     `%LOCALAPPDATA%\TranscendSync`). And Upload looked for an unbundled `upload.py`, to
     run with whatever `python` was on PATH, which on a clean PC is the Microsoft Store
     placeholder.
-  - **2026-11-02: SleepHQ dropped.** Scott now analyzes locally with
-    `~/projects/cpap/cpap_analyzer.py`, so the app's Upload button became **Analyze**
-    (runs the analyzer on `sleephq/out` into a separate `analysis/` folder) and
-    `pipeline.sh`'s upload stage became an analyze stage. `sleephq/upload.py` stays as a
-    standalone tool.
-  - ✅ **DONE (2026-11-03) — Analyze verified from a rebuilt exe on dejavu.** The exe found
+  - **2026-11-02: SleepHQ dropped.** Upload became **Analyze** (`cpap_analyzer.py` on
+    `sleephq/out`). **2026-11-03: Analyze became Import** — the cpap repo already had
+    `transcend_import.py` (stores the dump, refreshes SleepHQ Local), so the app and
+    `pipeline.sh` now hand the dump to it; Convert is optional. With the repo in WSL the
+    exe runs the importer inside WSL (SQLite can't lock the cache over `\\wsl.localhost`).
+    `sleephq/upload.py` stays as a standalone tool.
+  - ✅ **DONE (2026-11-03) — Analyze (since replaced by Import) verified from a rebuilt exe on dejavu.** The exe found
     the real python.org Python 3.12 (after a fix: it used to pick the Microsoft Store
     placeholder first on PATH), ran `cpap_analyzer.py` from WSL via a UNC `CPAP_ANALYZER`,
     and wrote the 4 outputs to `%LOCALAPPDATA%\TranscendSync\analysis` (2 nights, AHI

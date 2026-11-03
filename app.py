@@ -7,7 +7,7 @@ Python and Homebrew's python-tk) and drives the same pure-Python CLI stages.
 Buttons map 1:1 onto the CLI stages (see README.md):
     Pull        collect.py        device -> dump.txt
     Convert     sleephq/convert   dump.txt -> ResMed SD tree (sleephq/out)
-    Analyze     cpap_analyzer.py  sleephq/out -> charts + CSV (your local analyzer)
+    Import      transcend_import  dump.txt -> ~/projects/cpap (stored dump + SleepHQ Local)
     Settings    settings.py       read-only view of the device configuration
 
 Run with a normal Python (pip install pyserial) on Windows, or see
@@ -36,38 +36,92 @@ import convert as tconvert       # noqa: E402
 import transport as ttransport   # noqa: E402
 from transport import TransportError  # noqa: E402
 
-def app_paths(frozen, here, localappdata, env_analyzer, home=None):
-    """Where the app keeps the dump, the converted tree and the analysis
-    output, and which analyzer script Analyze runs.
+def app_paths(frozen, here, localappdata, env_cpap_repo, home=None):
+    """Where the app keeps the dump and the converted tree, and where the cpap
+    repo (whose transcend_import.py Import runs) lives.
 
     A one-file PyInstaller exe unpacks into a temporary %TEMP%\\_MEIxxxx folder
     that is deleted when the app closes, and __file__ points into it, so the
     frozen app keeps its data in %LOCALAPPDATA%\\TranscendSync instead. Run from
     source, files sit beside app.py.
 
-    The analyzer is the separate ResMed analyzer (~/projects/cpap), which needs
-    pandas + matplotlib, so it always runs as a script under a real Python.
-    CPAP_ANALYZER, when set, wins. Its output goes to its own "analysis" folder,
-    never the analyzer's default (its own directory), so a Transcend run can't
-    overwrite the ResMed charts and CSV."""
+    The cpap repo defaults to ~/projects/cpap; CPAP_REPO, when set, wins."""
     home = home or os.path.expanduser("~")
     if frozen:
         data = os.path.join(localappdata or home, "TranscendSync")
     else:
         data = here
+    cpap = env_cpap_repo or os.path.join(home, "projects", "cpap")
     return {"dump": os.path.join(data, "dump.txt"),
             "out": os.path.join(data, "sleephq", "out"),
-            "analysis": os.path.join(data, "analysis"),
-            "analyzer": env_analyzer or os.path.join(home, "projects", "cpap", "cpap_analyzer.py")}
+            "cpap_repo": cpap,
+            "importer": os.path.join(cpap, "transcend_import.py")}
+
+
+def import_command(py, importer, dump, tz="", since=""):
+    """argv for transcend_import.py. A blank zone keeps the zone in force; the
+    importer itself refuses a zone change without --since when the dump holds
+    nights it hasn't seen, and says so."""
+    cmd = [py, importer, dump]
+    if tz.strip():
+        cmd += ["--tz", tz.strip()]
+    if since.strip():
+        cmd += ["--since", since.strip()]
+    return cmd
+
+
+def import_env(frozen, here, environ):
+    """transcend_import.py decodes with this repo's parse.py, found through
+    TRANSCEND_REPO (its default is ~/personal/transcend-mini-CPAP). Run from
+    source, point it at this checkout unless already set. A frozen exe has no
+    parse.py on disk, so TRANSCEND_REPO must come from the environment."""
+    env = dict(environ)
+    if not frozen:
+        env.setdefault("TRANSCEND_REPO", here)
+    return env
+
+
+def wsl_split(path):
+    """\\\\wsl.localhost\\<distro>\\a\\b (or \\\\wsl$\\...) -> (distro, "/a/b"); else None."""
+    p = (path or "").replace("/", "\\")
+    for prefix in ("\\\\wsl.localhost\\", "\\\\wsl$\\"):
+        if p.lower().startswith(prefix.lower()):
+            distro, _, rest = p[len(prefix):].partition("\\")
+            if distro:
+                return distro, "/" + rest.replace("\\", "/").strip("/")
+    return None
+
+
+def to_wsl_path(path):
+    """A Windows path as WSL sees it: C:\\x\\y -> /mnt/c/x/y; a WSL UNC path -> its
+    Linux path; anything else unchanged."""
+    split = wsl_split(path)
+    if split:
+        return split[1]
+    if len(path) >= 2 and path[1] == ":" and path[0].isalpha():
+        return "/mnt/" + path[0].lower() + path[2:].replace("\\", "/")
+    return path
+
+
+def wsl_import_command(distro, linux_repo, dump, tz="", since="", transcend_repo=None):
+    """Run transcend_import.py inside WSL, for a cpap repo that lives there:
+    SQLite can't lock SleepHQ Local's cache through \\\\wsl.localhost ("database
+    is locked"), so Windows Python could store the dump but not refresh the
+    viewer. WSL's own python3 (which has the repo's dependencies) does both."""
+    inner = ["env"]
+    if transcend_repo:
+        inner.append(f"TRANSCEND_REPO={to_wsl_path(transcend_repo)}")
+    inner += import_command("python3", "transcend_import.py", to_wsl_path(dump), tz, since)
+    return ["wsl.exe", "-d", distro, "--cd", linux_repo, "--"] + inner
 
 
 FROZEN = getattr(sys, "frozen", False)
 _PATHS = app_paths(FROZEN, HERE, os.environ.get("LOCALAPPDATA"),
-                   os.environ.get("CPAP_ANALYZER"))
+                   os.environ.get("CPAP_REPO"))
 DUMP = _PATHS["dump"]
 OUT = _PATHS["out"]
-ANALYSIS = _PATHS["analysis"]
-ANALYZER = _PATHS["analyzer"]
+CPAP_REPO = _PATHS["cpap_repo"]
+IMPORTER = _PATHS["importer"]
 if FROZEN:
     os.makedirs(os.path.dirname(DUMP), exist_ok=True)
 
@@ -82,8 +136,8 @@ def is_store_stub(path):
 
 def find_python(frozen, env_python=None, which=shutil.which,
                 localappdata=None, glob=None):
-    """Interpreter for the external analyzer (it needs pandas + matplotlib,
-    so it can't run inside the frozen exe). From source: this Python. Frozen:
+    """Interpreter for the cpap repo's importer (it needs numpy, pandas and
+    matplotlib, so it can't run inside the frozen exe). From source: this Python. Frozen:
     CPAP_PYTHON if set, else python/py on PATH unless it's the Store stub,
     else the newest per-user python.org install, else None."""
     if not frozen:
@@ -132,13 +186,24 @@ class App:
         ttk.Entry(top, textvariable=self.port, width=24).pack(side="left", padx=(4, 16))
 
         self.buttons = []
-        for label, fn in [("Pull", self.do_pull), ("Convert", self.do_convert),
-                          ("Analyze", self.do_analyze),
-                          ("Pull → Convert → Analyze", self.do_all),
+        for label, fn in [("Pull", self.do_pull), ("Import", self.do_import),
+                          ("Pull → Import", self.do_all),
+                          ("Convert", self.do_convert),
                           ("Show settings", self.do_settings)]:
             b = ttk.Button(top, text=label, command=lambda f=fn: self.run_task(f))
             b.pack(side="left", padx=2)
             self.buttons.append(b)
+
+        # Only for travel: the zone slept in, passed to transcend_import.py as
+        # --tz / --since. Blank keeps the zone already recorded.
+        trip = ttk.Frame(root, padding=(8, 0, 8, 8))
+        trip.pack(fill="x")
+        ttk.Label(trip, text="Zone slept in (blank = unchanged):").pack(side="left")
+        self.tz = tk.StringVar(value="")
+        ttk.Entry(trip, textvariable=self.tz, width=20).pack(side="left", padx=(4, 16))
+        ttk.Label(trip, text="Arrived (local time, first import there):").pack(side="left")
+        self.since = tk.StringVar(value="")
+        ttk.Entry(trip, textvariable=self.since, width=18).pack(side="left", padx=4)
 
         self.log_widget = scrolledtext.ScrolledText(root, state="disabled",
                                                     font=("Consolas", 9))
@@ -149,9 +214,8 @@ class App:
         root.after(100, self._pump)
         self.log(f"dump:     {DUMP}")
         self.log(f"output:   {OUT}")
-        self.log(f"analysis: {ANALYSIS}")
-        self.log(f"analyzer: {ANALYZER}"
-                 + ("" if os.path.exists(ANALYZER) else "   (NOT FOUND — set CPAP_ANALYZER)"))
+        self.log(f"importer: {IMPORTER}"
+                 + ("" if os.path.exists(IMPORTER) else "   (NOT FOUND — set CPAP_REPO)"))
         self.log(f"port:     auto -> {self._detected_port()}")
         self.log("Ready. Device settings are view-only here; use settings.py to change them.\n")
 
@@ -228,36 +292,46 @@ class App:
         self.log(f"==> Converting -> {OUT} ...")
         self._captured(tconvert.main, [DUMP, "--out", OUT])
 
-    def do_analyze(self):
-        if not os.path.isdir(OUT):
-            self.log(f"No converted data at {OUT} — Convert first.")
+    def do_import(self):
+        """Hand the dump to the cpap repo: transcend_import.py stores it in
+        transcend/dumps/ (identical bytes are a no-op) and refreshes SleepHQ
+        Local, which shows Transcend nights beside the ResMed ones."""
+        if not os.path.exists(DUMP):
+            self.log(f"No dump at {DUMP} — Pull first.")
             return
-        if not os.path.exists(ANALYZER):
-            self.log(f"Analyzer not found at {ANALYZER} — set CPAP_ANALYZER.")
+        if not os.path.exists(IMPORTER):
+            self.log(f"Importer not found at {IMPORTER} — set CPAP_REPO to the cpap repo.")
             return
-        py = python_exe()
-        if not py:
-            self.log("No Python found to run the analyzer — install Python from "
-                     "python.org (with pandas and matplotlib) or set CPAP_PYTHON.")
-            return
-        os.makedirs(ANALYSIS, exist_ok=True)
-        self.log(f"==> Analyzing -> {ANALYSIS} (with {py}) ...")
-        proc = subprocess.Popen([py, ANALYZER, "--data-dir", OUT,
-                                 "--output-dir", ANALYSIS],
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        env = import_env(FROZEN, HERE, os.environ)
+        wsl = wsl_split(CPAP_REPO) if sys.platform == "win32" else None
+        if wsl:
+            cmd = wsl_import_command(wsl[0], wsl[1], DUMP, self.tz.get(), self.since.get(),
+                                     env.get("TRANSCEND_REPO"))
+            cwd, how = None, f"WSL {wsl[0]}"
+        else:
+            py = python_exe()
+            if not py:
+                self.log("No Python found to run the importer — install Python from "
+                         "python.org (with numpy, pandas and matplotlib) or set CPAP_PYTHON.")
+                return
+            cmd = import_command(py, IMPORTER, DUMP, self.tz.get(), self.since.get())
+            cwd, how = CPAP_REPO, py
+        self.log(f"==> Importing into {CPAP_REPO} (with {how}) ...")
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # no console flash on Windows
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace", creationflags=flags)
         for line in proc.stdout:
             self.log(line.rstrip())
         rc = proc.wait()
         if rc:
-            self.log(f"Analyze FAILED (exit {rc}) — the analyzer needs a Python "
-                     "with pandas and matplotlib.")
+            self.log(f"Import FAILED (exit {rc}).")
         else:
-            self.log(f"Analysis complete: charts and cpap_data.csv in {ANALYSIS}")
+            self.log("Import complete. Commit transcend/ in the cpap repo to keep the dump.")
 
     def do_all(self):
         self.do_pull()
-        self.do_convert()
-        self.do_analyze()
+        self.do_import()
 
     def do_settings(self):
         self.log(f"==> Reading settings from {self.port.get()} (read-only) ...")

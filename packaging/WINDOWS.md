@@ -29,10 +29,10 @@ needs an elevated PowerShell. Neither does anything else in this file:
 serial-port access, `-ExecutionPolicy Bypass` (per-process) and the PyInstaller
 build are all ordinary-user operations.
 
-For the analyze stage, also `pip install pandas matplotlib` and copy the
-ResMed analyzer (`cpap_analyzer.py` from `~/projects/cpap`) onto the machine;
-set `CPAP_ANALYZER` to its path unless it is at
-`%USERPROFILE%\projects\cpap\cpap_analyzer.py`.
+For the import stage you need the cpap repo (`~/projects/cpap`). If it lives in
+WSL, nothing else: the app runs the importer inside WSL (see section 3). If it
+is a Windows checkout, also `pip install numpy pandas matplotlib` and set
+`CPAP_REPO` to it unless it is at `%USERPROFILE%\projects\cpap`.
 
 ## 1. The routine, on Windows
 
@@ -42,10 +42,9 @@ without WSL or Git Bash. Run the stages directly (or use the GUI in section 2):
 ```powershell
 python collect.py --port auto --out dump.txt
 python parse.py dump.txt
-python sleephq\convert.py dump.txt --out sleephq\out
-mkdir analysis
-python $env:CPAP_ANALYZER --data-dir sleephq\out --output-dir analysis
+python sleephq\convert.py dump.txt --out sleephq\out      # optional ResMed-format tree
 ```
+then import from WSL, as in the README's step 4.
 
 `--port auto` finds the device by USB VID:PID, so you rarely need `--port COM3`.
 
@@ -55,7 +54,8 @@ The device stores UTC and both `parse.py` and `convert.py` render it in **this
 machine's** local zone by default. If you sleep in another timezone without
 changing the laptop clock, every night lands at the wrong time of day and
 sometimes the wrong date — a 23:00 Tokyo night shows up as 07:00 the same
-morning on a US-Pacific clock, which the analyzer then counts as a daytime nap.
+morning on a US-Pacific clock, which then counts as a daytime nap. (The cpap
+repo's importer has its own `--tz`/`--since`, the app's "Zone slept in" fields.)
 
 Pass the zone you actually slept in:
 
@@ -75,7 +75,7 @@ python sleephq\convert.py dump.txt --out out-tw --tz +08:00 --since 2026-11-11 -
 
 Keep the laptop on one timezone throughout. File names and contents depend on
 the rendered timestamp, so converting the same nights under two different zones
-into one folder produces two sets of files — duplicate nights in the analysis.
+into one folder produces two sets of files — duplicate nights.
 
 ## 2. Plain Python GUI (no build at all)
 
@@ -110,21 +110,27 @@ Notes:
   positives. Fine for personal use; distribution would need a code-signing
   certificate.
 - **Where the exe keeps its files:** `%LOCALAPPDATA%\TranscendSync\` (`dump.txt`
-  `sleephq\out\` and `analysis\`), shown in the first lines of the log. Not beside the exe:
+  and `sleephq\out\`), shown in the first lines of the log. Not beside the exe:
   a one-file exe unpacks into a temporary `%TEMP%\_MEIxxxx` folder that Windows
   deletes when the app closes, so files kept there vanished with the window
   (fixed 2026-11-02). Run from source, files still sit beside `app.py`.
-- **Analyze from the frozen exe** is the one button that still needs Python:
-  it runs the separate ResMed analyzer (pandas + matplotlib, too heavy to
-  bundle) under a real Python. Pull, Convert and Show settings need nothing
-  installed. It uses `CPAP_PYTHON` if set, else `python`/`py` on PATH —
-  skipping the Microsoft Store placeholder in `WindowsApps`, which is often
-  first on PATH — else the newest `%LOCALAPPDATA%\Programs\Python\Python3*`
-  install; the log names the interpreter it used. The log's `analyzer:` line
-  shows the script it will run and says NOT FOUND if it isn't there; set
-  `CPAP_ANALYZER` to its path. With the analyzer in WSL, a UNC path works
-  (dejavu, 2026-11-03):
-  `[Environment]::SetEnvironmentVariable("CPAP_ANALYZER", "\\wsl.localhost\Ubuntu\home\<you>\projects\cpap\cpap_analyzer.py", "User")`.
+- **Import from the frozen exe** runs the cpap repo's `transcend_import.py`
+  (numpy, pandas, matplotlib — too heavy to bundle); Pull, Convert and Show
+  settings need nothing installed. The log's `importer:` line shows the script
+  and says NOT FOUND if it isn't there; set `CPAP_REPO` to the repo.
+  - **Repo in WSL** (dejavu): set `CPAP_REPO` to its `\\wsl.localhost\<distro>\...`
+    path and `TRANSCEND_REPO` to this repo's (the exe has no `parse.py` on
+    disk, and the importer's default is `~/personal/transcend-mini-CPAP`):
+    `[Environment]::SetEnvironmentVariable("CPAP_REPO", "\\wsl.localhost\Ubuntu\home\<you>\projects\cpap", "User")`
+    and the same for `TRANSCEND_REPO`. The app then runs the importer **inside
+    WSL** (`wsl.exe -d <distro> --cd <repo> ... python3 transcend_import.py`)
+    with the dump as `/mnt/c/...`. Windows Python can't do it: SQLite can't
+    lock SleepHQ Local's cache through `\\wsl.localhost` ("database is locked",
+    seen 2026-11-03), so it stores the dump but leaves the viewer stale.
+  - **Windows checkout**: it runs under `CPAP_PYTHON` if set, else
+    `python`/`py` on PATH — skipping the Microsoft Store placeholder in
+    `WindowsApps`, which is often first on PATH — else the newest
+    `%LOCALAPPDATA%\Programs\Python\Python3*` install; the log names it.
 - **Smart App Control** (Windows 11, enforcing) judges every unsigned build
   separately, because each build is a new file with no reputation. On dejavu
   the 2026-11-02 build ran; the first 2026-11-03 build was blocked

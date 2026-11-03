@@ -61,18 +61,18 @@ python3 settings.py --show
 `sessions.csv` is the per-night summary (usage, AHI, apneas/hypopneas, min/max
 pressure, leak) — the natural thing to feed into your own dashboard.
 
-## 5. Full pipeline (pull → convert → analyze)
+## 5. Full pipeline (pull → import into the cpap repo)
 
 ```sh
-./pipeline.sh --no-analyze       # pull + convert to a ResMed-format SD tree
-./pipeline.sh                    # + run ~/projects/cpap/cpap_analyzer.py -> analysis/
-PORT=/dev/cu.usbserial-XXXX ./pipeline.sh --no-analyze   # explicit port
+./pipeline.sh                    # pull, then transcend_import.py in ~/projects/cpap
+./pipeline.sh --no-import        # pull only
+PORT=/dev/cu.usbserial-XXXX ./pipeline.sh   # explicit port
 ```
 
 `pipeline.sh` is OS-agnostic — the pull stage calls `collect.py`, which
-picks the serial backend itself. The analyze stage needs a Python with pandas
-and matplotlib (`ANALYZER_PYTHON=`, default `python3`) and the analyzer script
-(`CPAP_ANALYZER=`, default `~/projects/cpap/cpap_analyzer.py`).
+picks the serial backend itself. The import stage needs the cpap repo
+(`CPAP_REPO=`, default `~/projects/cpap`) and a Python with its dependencies
+(`IMPORT_PYTHON=`, default `python3`).
 
 ### Optional: uploading to SleepHQ by hand
 

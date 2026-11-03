@@ -1,10 +1,11 @@
 # transcend-mini-CPAP
 
-Pull therapy data off a **Somnetics Transcend Micro** CPAP over USB, convert it to
-the ResMed SD‑card format, and analyze it locally with the ResMed analyzer in
-`~/projects/cpap` (`cpap_analyzer.py`) — none of which the device officially
-supports. The ResMed‑format tree also imports into [SleepHQ](https://sleephq.com),
-which this project used to upload to; that step is now optional and run by hand.
+Pull therapy data off a **Somnetics Transcend Micro** CPAP over USB and hand it to
+the `~/projects/cpap` repo, whose `transcend_import.py` stores each pull and shows
+the nights in SleepHQ Local and `cpap_analyzer.py` beside the ResMed ones — none of
+which the device officially supports. This repo also converts a pull to the ResMed
+SD‑card format, which imports into [SleepHQ](https://sleephq.com); this project used
+to upload there, and that step is now optional and run by hand.
 
 > **Naming:** the device is a **Transcend Micro (510)**; Somnetics' desktop software
 > is called **"mini" / "mini PAP"** (its installer icon is literally "MiniCPAP"),
@@ -24,13 +25,14 @@ pipeline from the device to a CSV and to a ResMed‑format dataset.
                                                           │
                                                   convert.py (sleephq/)
                                                           ▼
-                                 ResMed‑format SD tree ──cpap_analyzer.py──▶ analysis/
-                                   (sleephq/out)          (~/projects/cpap)   charts + CSV
+                                         ResMed‑format SD tree (sleephq/out, optional)
+
+ dump.txt ──transcend_import.py (~/projects/cpap)──▶ transcend/dumps/ + SleepHQ Local
 ```
 
 Runs natively on **macOS, Linux, and Windows** — `collect.py` is pure Python
 (pyserial), auto‑detects the device by USB VID:PID, and drives the same pull →
-convert → analyze pipeline on every OS. See [`packaging/MACOS.md`](packaging/MACOS.md)
+import pipeline on every OS. See [`packaging/MACOS.md`](packaging/MACOS.md)
 for macOS setup, or [`packaging/WINDOWS.md`](packaging/WINDOWS.md) for Windows
 (including the standalone `.exe`).
 
@@ -43,8 +45,8 @@ python3 -m venv .venv && .venv/bin/pip install pyserial
 ```
 `transcend`/`pipeline.sh` auto‑detect and prefer `./.venv/bin/python3` if it
 exists, so no `source .venv/bin/activate` is needed — just run them directly.
-The analyze stage runs `~/projects/cpap/cpap_analyzer.py` (override with
-`CPAP_ANALYZER=`) under `python3`, which needs pandas and matplotlib.
+The import stage runs `transcend_import.py` from the cpap repo (`~/projects/cpap`,
+override with `CPAP_REPO=`) under `python3`, which needs that repo's dependencies.
 
 **The recurring routine** — plug the CPAP into USB, then:
 ```bash
@@ -64,15 +66,15 @@ vars, just a nicer name to type.)
 > `parse.py` and `sleephq/convert.py`, and keep the laptop on one timezone
 > throughout a trip.
 
-That pulls every session currently on the device, converts it to a ResMed‑format
-tree in `sleephq/out/`, and runs the analyzer on it. Charts and `cpap_data.csv` land
-in `analysis/` here — never in `~/projects/cpap`, so the ResMed machine's results
-there are left alone. It always re‑pulls everything the device is holding (not just
-new nights), which is cheap.
+That pulls every session currently on the device and imports it into the cpap repo:
+the dump is stored in its `transcend/dumps/` (identical bytes are a no‑op) and
+SleepHQ Local is refreshed. Commit `transcend/` there to keep it. It always re‑pulls
+everything the device is holding (not just new nights), which is cheap.
 
 ```bash
-./pipeline.sh --no-analyze   # just pull + convert; inspect sleephq/out/
-./pipeline.sh --no-pull      # re-convert and re-analyze the existing dump.txt
+./pipeline.sh --no-pull      # import the existing dump.txt
+./pipeline.sh --convert      # also write the ResMed-format tree to sleephq/out/
+SLEPT_TZ=Asia/Tokyo SLEPT_SINCE="2026-10-16 17:00" ./pipeline.sh   # first import abroad
 ```
 
 Everything past this point explains what each stage does individually and how to
@@ -97,8 +99,8 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 | File | Purpose |
 |---|---|
 | [`PROTOCOL.md`](PROTOCOL.md) | The reverse‑engineered serial wire protocol (commands, framing, the 5‑byte event format, all 28 event types) |
-| `pipeline.sh` | End‑to‑end orchestrator: pull → convert → analyze (with stage‑skip flags); OS‑agnostic, calls `collect.py` |
-| `app.py` | **Cross‑platform GUI** (macOS/Linux/Windows, plain tkinter) — Pull / Convert / Analyze buttons + read‑only settings view, port auto‑prefilled. See [`packaging/MACOS.md`](packaging/MACOS.md) / [`packaging/WINDOWS.md`](packaging/WINDOWS.md) |
+| `pipeline.sh` | End‑to‑end orchestrator: pull → import into the cpap repo (convert optional); OS‑agnostic, calls `collect.py` |
+| `app.py` | **Cross‑platform GUI** (macOS/Linux/Windows, plain tkinter) — Pull / Import / Convert buttons + read‑only settings view, port auto‑prefilled. See [`packaging/MACOS.md`](packaging/MACOS.md) / [`packaging/WINDOWS.md`](packaging/WINDOWS.md) |
 | `transport.py` | Serial backends, auto‑selected: **pyserial** (native macOS/Linux/Windows) or the **powershell.exe bridge** (WSL, no usbipd). `find_port()` locates the device by USB VID:PID; under WSL, where the device sits on the Windows side and is invisible to a Linux‑side scan, `--port auto` falls back to the bridge on `COM3` |
 | `collect.py` | Pure‑Python, cross‑platform event‑log collector (same `dump.txt` format as `collect.ps1`); what `pipeline.sh` and `app.py` call |
 | `collect.ps1` | Original PowerShell collector — kept for reference; native Windows/WSL runs now go through `collect.py` |
@@ -112,7 +114,7 @@ breathing/flow graphs are genuinely empty — there is no source data to plot.
 | `tests/` | Unit tests (decoder round‑trip, multi‑dump merge, converter end‑to‑end) — `python3 -m unittest discover -s tests`; no device needed |
 | [`docs/NOTES.md`](docs/NOTES.md) | Distilled facts from the official Somnetics manuals (log capacity, setting constraints, stat definitions); the PDFs themselves are git‑ignored |
 
-Personal data (`dump.txt`, `*.csv`, `sleephq/out/`, `analysis/`) is git‑ignored.
+Personal data (`dump.txt`, `*.csv`, `sleephq/out/`) is git‑ignored.
 
 ## Requirements
 
@@ -129,7 +131,7 @@ Personal data (`dump.txt`, `*.csv`, `sleephq/out/`, `analysis/`) is git‑ignore
   see a device attached to Windows, so under WSL `--port auto` resolves to the bridge
   on `COM3`; pass `--port COM4` (etc.) if yours enumerates elsewhere.
 - Python 3.8+ for `parse.py` / `convert.py` / `sleephq/upload.py` (standard library only);
-  the analyze stage's `cpap_analyzer.py` also needs pandas and matplotlib.
+  the import stage runs the cpap repo's code, which also needs numpy, pandas and matplotlib.
   `pyserial` is needed only for the direct‑serial transport (native macOS/Linux/Windows,
   or a usbipd‑attached port under WSL); the WSL powershell‑bridge path needs nothing extra.
 - **On Linux (and a usbipd‑attached port under WSL), the port node is `root:dialout` mode
@@ -150,7 +152,7 @@ Personal data (`dump.txt`, `*.csv`, `sleephq/out/`, `analysis/`) is git‑ignore
 ### macOS / Linux / Windows app
 ```bash
 pip install pyserial
-python3 app.py        # GUI: Pull / Convert / Analyze buttons + settings view
+python3 app.py        # GUI: Pull / Import / Convert buttons + settings view
 ```
 Plain tkinter (`python-tk` on Homebrew, ships by default on python.org/Windows
 Python), so the same GUI runs everywhere; the port field prefills with the
@@ -164,16 +166,19 @@ python3 collect.py --port COM3 --out dump.txt    # ...or name the port explicitl
 ```
 
 ### All in one: `pipeline.sh`
-The whole flow — pull from the device → convert → analyze — is wired together:
+The whole flow — pull from the device → import into the cpap repo — is wired together:
 ```bash
-./pipeline.sh                 # pull -> convert -> analyze (all data on the device)
-./pipeline.sh --no-analyze    # pull + convert only (inspect sleephq/out/ first)
-./pipeline.sh --no-pull       # reuse the existing dump.txt (skip the device)
+./pipeline.sh                 # pull -> import (all data on the device)
+./pipeline.sh --no-import     # pull only
+./pipeline.sh --no-pull       # import the existing dump.txt (skip the device)
+./pipeline.sh --convert       # also write the ResMed-format tree (sleephq/out/)
 PORT=/dev/cu.usbserial-XXXX ./pipeline.sh   # explicit port (default: auto-detect)
 ```
-The analyze stage runs `~/projects/cpap/cpap_analyzer.py` (override with
-`CPAP_ANALYZER=…`) under `python3` (override with `ANALYZER_PYTHON=…`) with
-`--data-dir sleephq/out --output-dir analysis`. The individual stages are below.
+The import stage runs `transcend_import.py dump.txt` inside the cpap repo
+(`CPAP_REPO=…`, default `~/projects/cpap`) under `python3` (`IMPORT_PYTHON=…`),
+with `TRANSCEND_REPO` set to this checkout so it decodes with this repo's `parse.py`.
+Travelling: `SLEPT_TZ` / `SLEPT_SINCE` become its `--tz` / `--since`. The individual
+stages are below.
 
 ### 1. Download the event log
 ```bash
@@ -193,7 +198,7 @@ python3 parse.py dump.txt
 #    Device serial, AHI, usage, pressure, leak per session.
 ```
 
-### 3. Convert to a ResMed‑format tree
+### 3. (Optional) Convert to a ResMed‑format tree
 ```bash
 python3 sleephq/convert.py dump.txt --out sleephq/out
 # --min-minutes N   drop sessions shorter than N (default 5; excludes factory/QA blips)
@@ -214,16 +219,18 @@ machine). The output folder is still called `sleephq/out` for history's sake.
 > — header‑only, PHI‑stripped ResMed signal definitions (no serial, no patient data, no
 > therapy records). No real ResMed machine or SD card is needed to run the converter.
 
-### 4. Analyze
+### 4. Import into the cpap repo
 ```bash
-mkdir -p analysis
-python3 ~/projects/cpap/cpap_analyzer.py --data-dir sleephq/out --output-dir analysis
+cd ~/projects/cpap
+TRANSCEND_REPO=~/projects/transcend-mini-CPAP python3 transcend_import.py \
+    ~/projects/transcend-mini-CPAP/dump.txt                 # add --tz/--since when abroad
+git add transcend && git commit -m "Transcend: pull of $(date +%F)"
 ```
-`cpap_analyzer.py` reads the converted tree unchanged (checked 2026-11-02 on the 6/6 and
-6/8 nights: device AirSense11AutoSet, serial = the Transcend's, AHI 10.3). Always pass
-`--output-dir`: its default is its own directory, where it would overwrite the ResMed
-machine's `cpap_data.csv` and charts. Keep the Transcend tree out of `~/projects/cpap/data`
-too — the analyzer treats one data folder as one machine.
+The importer (in the cpap repo, documented in its CLAUDE.md) stores the dump in
+`transcend/dumps/`, records any zone change in `transcend/timezones.csv`, and refreshes
+SleepHQ Local; `cpap_analyzer.py` there shows the nights too, flagged by device. It
+decodes with this repo's `parse.py` through `TRANSCEND_REPO`. Don't put a converted tree
+into `~/projects/cpap/data` — that folder is the ResMed card's.
 
 ### 5. (Optional) Upload to SleepHQ
 No longer part of the pipeline or the app; kept working in case it's wanted. One-time: create an API client in SleepHQ's Account Settings, then save
