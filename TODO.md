@@ -42,9 +42,13 @@
     `~/projects/cpap/cpap_analyzer.py`, so the app's Upload button became **Analyze**
     (runs the analyzer on `sleephq/out` into a separate `analysis/` folder) and
     `pipeline.sh`'s upload stage became an analyze stage. `sleephq/upload.py` stays as a
-    standalone tool. The exe on dejavu predates this and still has Upload — rebuild it.
-  - ⬜ **Not yet checked:** a real Pull from the exe (needs the device on that PC), and
-    Analyze from a rebuilt exe (needs Python + pandas + matplotlib and the analyzer there).
+    standalone tool.
+  - ✅ **DONE (2026-11-03) — Analyze verified from a rebuilt exe on dejavu.** The exe found
+    the real python.org Python 3.12 (after a fix: it used to pick the Microsoft Store
+    placeholder first on PATH), ran `cpap_analyzer.py` from WSL via a UNC `CPAP_ANALYZER`,
+    and wrote the 4 outputs to `%LOCALAPPDATA%\TranscendSync\analysis` (2 nights, AHI
+    10.32). One rebuild that day was blocked by Smart App Control; a clean rebuild ran.
+  - ⬜ **Not yet checked:** a real Pull from the exe (needs the device plugged into that PC).
 
 ## From the vendor manuals (see docs/NOTES.md for cites)
 
