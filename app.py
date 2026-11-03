@@ -72,12 +72,44 @@ if FROZEN:
     os.makedirs(os.path.dirname(DUMP), exist_ok=True)
 
 
-def python_exe():
-    """Interpreter for the external analyzer. A frozen .exe is not a Python,
-    so fall back to whatever python is on PATH."""
-    if not getattr(sys, "frozen", False):
+def is_store_stub(path):
+    """The Microsoft Store "python.exe" in ...\\WindowsApps is a placeholder
+    that opens the Store (or prints "Python was not found") instead of
+    running anything, and it often comes first on PATH even with a real
+    Python installed."""
+    return "windowsapps" in (path or "").lower()
+
+
+def find_python(frozen, env_python=None, which=shutil.which,
+                localappdata=None, glob=None):
+    """Interpreter for the external analyzer (it needs pandas + matplotlib,
+    so it can't run inside the frozen exe). From source: this Python. Frozen:
+    CPAP_PYTHON if set, else python/py on PATH unless it's the Store stub,
+    else the newest per-user python.org install, else None."""
+    if not frozen:
         return sys.executable
-    return shutil.which("python") or shutil.which("py") or "python"
+    if env_python:
+        return env_python
+    for name in ("python", "py"):
+        hit = which(name)
+        if hit and not is_store_stub(hit):
+            return hit
+    if localappdata:
+        import glob as _glob
+        found = (glob or _glob.glob)(os.path.join(localappdata, "Programs", "Python",
+                                                  "Python3*", "python.exe"))
+
+        def ver(p):
+            tail = os.path.basename(os.path.dirname(p))[len("Python"):]
+            return int(tail) if tail.isdigit() else 0
+        if found:
+            return max(found, key=ver)
+    return None
+
+
+def python_exe():
+    return find_python(FROZEN, os.environ.get("CPAP_PYTHON"),
+                       localappdata=os.environ.get("LOCALAPPDATA"))
 
 
 class App:
@@ -203,9 +235,14 @@ class App:
         if not os.path.exists(ANALYZER):
             self.log(f"Analyzer not found at {ANALYZER} — set CPAP_ANALYZER.")
             return
+        py = python_exe()
+        if not py:
+            self.log("No Python found to run the analyzer — install Python from "
+                     "python.org (with pandas and matplotlib) or set CPAP_PYTHON.")
+            return
         os.makedirs(ANALYSIS, exist_ok=True)
-        self.log(f"==> Analyzing -> {ANALYSIS} ...")
-        proc = subprocess.Popen([python_exe(), ANALYZER, "--data-dir", OUT,
+        self.log(f"==> Analyzing -> {ANALYSIS} (with {py}) ...")
+        proc = subprocess.Popen([py, ANALYZER, "--data-dir", OUT,
                                  "--output-dir", ANALYSIS],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:

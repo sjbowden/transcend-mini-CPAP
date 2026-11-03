@@ -116,12 +116,25 @@ Notes:
   (fixed 2026-11-02). Run from source, files still sit beside `app.py`.
 - **Analyze from the frozen exe** is the one button that still needs Python:
   it runs the separate ResMed analyzer (pandas + matplotlib, too heavy to
-  bundle) with `python` from PATH. Pull, Convert and Show settings need
-  nothing installed. The log's `analyzer:` line shows the script it will run
-  and says NOT FOUND if it isn't there; set `CPAP_ANALYZER` to its path.
-- **Smart App Control** (Windows 11) let the unsigned exe run on the build
-  machine (2026-11-02, enforcing mode, no Code Integrity blocks). Another PC
-  may decide differently; if it blocks the exe, run `python app.py` instead.
+  bundle) under a real Python. Pull, Convert and Show settings need nothing
+  installed. It uses `CPAP_PYTHON` if set, else `python`/`py` on PATH —
+  skipping the Microsoft Store placeholder in `WindowsApps`, which is often
+  first on PATH — else the newest `%LOCALAPPDATA%\Programs\Python\Python3*`
+  install; the log names the interpreter it used. The log's `analyzer:` line
+  shows the script it will run and says NOT FOUND if it isn't there; set
+  `CPAP_ANALYZER` to its path. With the analyzer in WSL, a UNC path works
+  (dejavu, 2026-11-03):
+  `[Environment]::SetEnvironmentVariable("CPAP_ANALYZER", "\\wsl.localhost\Ubuntu\home\<you>\projects\cpap\cpap_analyzer.py", "User")`.
+- **Smart App Control** (Windows 11, enforcing) judges every unsigned build
+  separately, because each build is a new file with no reputation. On dejavu
+  the 2026-11-02 build ran; the first 2026-11-03 build was blocked
+  ("An Application Control policy has blocked this file", Code Integrity event
+  3077 in `Microsoft-Windows-CodeIntegrity/Operational`) on every launch; a
+  clean rebuild minutes later (`--clean`) ran. So a block is per-file, not
+  permanent: rebuild and try again, or run from source — `pythonw app.py` is
+  never blocked, since the python.org interpreter is signed. Only code signing
+  makes the exe reliable. Do not turn Smart App Control off to get round it:
+  it can't be turned back on without reinstalling Windows.
 - `--tz` with a zone *name* (`Asia/Tokyo`) needs the `tzdata` package on
   Windows, which PyInstaller does not bundle by itself. The GUI never uses
   `--tz`; for the CLI, `pip install tzdata` or pass an offset (`+09:00`).

@@ -60,6 +60,33 @@ class TestAppPaths(unittest.TestCase):
             self.assertEqual(p["analyzer"], "/x/an.py")
 
 
+class TestFindPython(unittest.TestCase):
+    STUB = os.path.join(LOCAL, "Microsoft", "WindowsApps", "python.exe")
+    REAL = os.path.join(LOCAL, "Programs", "Python")
+
+    def test_from_source_uses_this_interpreter(self):
+        self.assertEqual(app.find_python(False), sys.executable)
+
+    def test_env_override_wins(self):
+        self.assertEqual(app.find_python(True, "D:\\py\\python.exe", which=lambda n: None),
+                         "D:\\py\\python.exe")
+
+    def test_skips_the_store_stub_and_finds_the_newest_install(self):
+        installs = [os.path.join(self.REAL, d, "python.exe")
+                    for d in ("Python39", "Python312", "Python311")]
+        got = app.find_python(True, which=lambda n: self.STUB if n == "python" else None,
+                              localappdata=LOCAL, glob=lambda pat: installs)
+        self.assertEqual(got, installs[1])
+
+    def test_a_real_python_on_path_is_used(self):
+        real = os.path.join("C:\\", "Python312", "python.exe")
+        self.assertEqual(app.find_python(True, which=lambda n: real), real)
+
+    def test_nothing_found_is_none(self):
+        self.assertIsNone(app.find_python(True, which=lambda n: self.STUB,
+                                          localappdata=LOCAL, glob=lambda pat: []))
+
+
 class _FakeApp:
     def __init__(self):
         self.lines = []
