@@ -27,9 +27,19 @@
     on another machine. It needs the Transcend actually used for a few nights, or a
     deliberate long bench run, then a re-run of the diff. `collect.ps1` stays in the tree as
     the reference implementation until then.
-- ⬜ **Build + smoke-test the .exe** per packaging/WINDOWS.md (needs Windows Python:
-  pyinstaller is not a cross-compiler). Check the bundled templates resolve (one Convert
-  run) and note the SmartScreen first-run warning.
+- ✅ **DONE (2026-11-02) — .exe built and smoke-tested** per packaging/WINDOWS.md, on
+  dejavu (Python 3.12.10 from python.org, PyInstaller 6.22.3): `TranscendSync.exe`,
+  10.7 MB. Smart App Control (enforcing) let it run, with no Code Integrity blocks. One
+  Convert run inside the exe used the bundled templates and wrote 14 files
+  **byte-identical** to `convert.py` run from source on the same dump.
+  - The smoke test found two bugs, now fixed with tests (`tests/test_app_paths.py`): the
+    frozen app kept `dump.txt` and `sleephq/out` in PyInstaller's temporary unpack
+    folder, which is deleted on exit, so a Pull vanished with the window (now
+    `%LOCALAPPDATA%\TranscendSync`). And Upload looked for an unbundled `upload.py`, to
+    run with whatever `python` was on PATH, which on a clean PC is the Microsoft Store
+    placeholder (now the bundled module runs in-process).
+  - ⬜ **Not yet checked:** a real Pull and Upload from the exe. Pull needs the device on
+    that PC; Upload needs `%USERPROFILE%\.sleephq_credentials` there.
 
 ## From the vendor manuals (see docs/NOTES.md for cites)
 

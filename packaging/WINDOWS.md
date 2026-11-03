@@ -110,10 +110,24 @@ Notes:
   on first run (More info → Run anyway), and occasionally antivirus false
   positives. Fine for personal use; distribution would need a code-signing
   certificate.
-- **Upload from the frozen exe** shells out to `python` on PATH to run the
-  bundled SleepHQ uploader (`SLEEPHQ_UPLOADER`, default `sleephq/upload.py`
-  next to the app) — the exe itself is not a Python interpreter. If no Python
-  is on PATH, run the upload stage separately.
+- **Where the exe keeps its files:** `%LOCALAPPDATA%\TranscendSync\` (`dump.txt`
+  and `sleephq\out\`), shown in the first lines of the log. Not beside the exe:
+  a one-file exe unpacks into a temporary `%TEMP%\_MEIxxxx` folder that Windows
+  deletes when the app closes, so files kept there vanished with the window
+  (fixed 2026-11-02). Run from source, files still sit beside `app.py`.
+- **Upload from the frozen exe** runs the bundled `sleephq/upload.py` inside the
+  exe (it is standard-library only), so no Python install is needed; the log's
+  third line reads `uploader: built in`. Setting `SLEEPHQ_UPLOADER` to a script
+  path still makes it run that script with `python` on PATH instead.
+- **SleepHQ credentials** are read from `%USERPROFILE%\.sleephq_credentials`
+  (the same JSON as on Linux/macOS; see `sleephq/upload.py`). Restrict it to
+  your account: `icacls $env:USERPROFILE\.sleephq_credentials /inheritance:r /grant:r "${env:USERNAME}:F"`.
+- **Smart App Control** (Windows 11) let the unsigned exe run on the build
+  machine (2026-11-02, enforcing mode, no Code Integrity blocks). Another PC
+  may decide differently; if it blocks the exe, run `python app.py` instead.
+- `--tz` with a zone *name* (`Asia/Tokyo`) needs the `tzdata` package on
+  Windows, which PyInstaller does not bundle by itself. The GUI never uses
+  `--tz`; for the CLI, `pip install tzdata` or pass an offset (`+09:00`).
 
 ## 4. From WSL (development convenience)
 

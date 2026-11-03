@@ -37,10 +37,36 @@ import convert as tconvert       # noqa: E402
 import transport as ttransport   # noqa: E402
 from transport import TransportError  # noqa: E402
 
-DUMP = os.path.join(HERE, "dump.txt")
-OUT = os.path.join(HERE, "sleephq", "out")
-UPLOADER = os.environ.get("SLEEPHQ_UPLOADER",
-                          os.path.join(HERE, "sleephq", "upload.py"))
+def app_paths(frozen, here, localappdata, env_uploader):
+    """Where the app keeps the dump and the converted tree, and which uploader
+    it runs (None = the bundled upload module, in-process).
+
+    A one-file PyInstaller exe unpacks into a temporary %TEMP%\\_MEIxxxx folder
+    that is deleted when the app closes, and __file__ points into it, so the
+    frozen app keeps its data in %LOCALAPPDATA%\\TranscendSync instead. It also
+    can't run sleephq/upload.py as a script (not bundled, and no real Python is
+    guaranteed on PATH), so it imports the uploader. Run from source, nothing
+    changes: files sit beside app.py and the uploader runs as a script.
+    SLEEPHQ_UPLOADER, when set, always wins."""
+    if frozen:
+        data = os.path.join(localappdata or os.path.expanduser("~"), "TranscendSync")
+        uploader = env_uploader or None
+    else:
+        data = here
+        uploader = env_uploader or os.path.join(here, "sleephq", "upload.py")
+    return {"dump": os.path.join(data, "dump.txt"),
+            "out": os.path.join(data, "sleephq", "out"),
+            "uploader": uploader}
+
+
+FROZEN = getattr(sys, "frozen", False)
+_PATHS = app_paths(FROZEN, HERE, os.environ.get("LOCALAPPDATA"),
+                   os.environ.get("SLEEPHQ_UPLOADER"))
+DUMP = _PATHS["dump"]
+OUT = _PATHS["out"]
+UPLOADER = _PATHS["uploader"]
+if FROZEN:
+    os.makedirs(os.path.dirname(DUMP), exist_ok=True)
 
 
 def python_exe():
@@ -88,8 +114,11 @@ class App:
         root.after(100, self._pump)
         self.log(f"dump:     {DUMP}")
         self.log(f"output:   {OUT}")
-        self.log(f"uploader: {UPLOADER}"
-                 + ("" if os.path.exists(UPLOADER) else "   (NOT FOUND — set SLEEPHQ_UPLOADER)"))
+        if UPLOADER is None:
+            self.log("uploader: built in")
+        else:
+            self.log(f"uploader: {UPLOADER}"
+                     + ("" if os.path.exists(UPLOADER) else "   (NOT FOUND — set SLEEPHQ_UPLOADER)"))
         self.log(f"port:     auto -> {self._detected_port()}")
         self.log("Ready. Device settings are view-only here; use settings.py to change them.\n")
 
@@ -144,12 +173,15 @@ class App:
         threading.Thread(target=worker, daemon=True).start()
 
     def _captured(self, fn, *a, **kw):
-        """Run fn capturing its stdout into the log pane."""
+        """Run fn capturing its stdout and stderr into the log pane; return
+        what fn returned (an exit code, for the CLI mains)."""
         buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            fn(*a, **kw)
-        for line in buf.getvalue().splitlines():
-            self.log(line)
+        try:
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                return fn(*a, **kw)
+        finally:
+            for line in buf.getvalue().splitlines():
+                self.log(line)
 
     # ------------------------------------------------------------------ tasks
     def do_pull(self):
@@ -164,18 +196,24 @@ class App:
         self._captured(tconvert.main, [DUMP, "--out", OUT])
 
     def do_upload(self):
-        if not os.path.exists(UPLOADER):
-            self.log(f"Uploader not found at {UPLOADER} — set SLEEPHQ_UPLOADER.")
-            return
-        self.log("==> Uploading to SleepHQ ...")
-        proc = subprocess.Popen(
-            [python_exe(), UPLOADER, "--data-dir", OUT, "--all",
-             "--import-name", f"Transcend (app, {date.today():%Y-%m-%d})"],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in proc.stdout:
-            self.log(line.rstrip())
-        if proc.wait() != 0:
-            self.log(f"Upload FAILED (exit {proc.returncode}).")
+        args = ["--data-dir", OUT, "--all",
+                "--import-name", f"Transcend (app, {date.today():%Y-%m-%d})"]
+        if UPLOADER is None:                 # frozen: the bundled module, no Python needed
+            import upload as tupload
+            self.log("==> Uploading to SleepHQ ...")
+            rc = self._captured(tupload.main, args)
+        else:
+            if not os.path.exists(UPLOADER):
+                self.log(f"Uploader not found at {UPLOADER} — set SLEEPHQ_UPLOADER.")
+                return
+            self.log("==> Uploading to SleepHQ ...")
+            proc = subprocess.Popen([python_exe(), UPLOADER] + args,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proc.stdout:
+                self.log(line.rstrip())
+            rc = proc.wait()
+        if rc:
+            self.log(f"Upload FAILED (exit {rc}).")
         else:
             self.log("Upload complete.")
 
